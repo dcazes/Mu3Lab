@@ -24,7 +24,7 @@ def _day(stamp: Any) -> date | None:
 
 def trips(ctx: WidgetContext) -> dict[str, Any]:
     key = ctx.own_credentials(CONNECTOR).get(KEY_ENV, "")
-    reply = ctx.get("/api/collections/", headers={"Authorization": f"Api-Key {key}"})
+    reply = ctx.get("/api/collections", headers={"Authorization": f"Api-Key {key}"})
     found = reply.get("results", []) if isinstance(reply, dict) else reply or []
     today = date.today()
     ahead = []

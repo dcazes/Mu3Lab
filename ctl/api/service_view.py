@@ -51,6 +51,9 @@ def _service_snapshot(identity: IdentityData | None = None) -> object:
     store = JobStore.runtime()
     # Active jobs first, however old, so a long-running one is never missed.
     jobs = list({job["id"]: job for job in [*store.active_jobs(), *store.jobs(limit=100)]}.values()) if store else []
+    # Each waiting job's turn: the worker takes the oldest queued job first, one at a time.
+    queued = [job for job in reversed(jobs) if job["state"] == "queued"]
+    turns = {str(job["id"]): turn for turn, job in enumerate(sorted(queued, key=lambda job: job["created_at"]), 1)}
     control_state = ControlState.runtime()
     active = {str(job["id"]) for job in jobs if job["state"] in {"queued", "running", "waiting_for_confirmation"}}
     interrupted = in_progress.all_interrupted(active)
@@ -117,7 +120,7 @@ def _service_snapshot(identity: IdentityData | None = None) -> object:
             "mode": service.account.get("mode", "none"),
             "state": "pending" if service.account.get("mode", "none") != "none" else "not_required",
         }
-        item["last_job"] = latest
+        item["last_job"] = {**latest, "queue_position": turns.get(str(latest["id"]))} if latest else None
         item["last_job_id"] = str(latest["id"]) if latest else ""
         if service.stage == "optional":
             if item["state"] in INSTALLED_STATES:

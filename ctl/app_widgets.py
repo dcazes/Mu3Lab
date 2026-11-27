@@ -11,10 +11,22 @@ widget's id (dashes as underscores), taking a ``WidgetContext`` and returning a 
   or cannot answer, so a widget still says something useful;
 * trimming what comes back to the shape the dashboard draws, so one app's mistake cannot break the
   board, and never passing on an error's details, which could hold an address or a key.
+
+A widget drawn its own way (manifest ``view``: a note to edit, a slideshow) returns its data under
+``view`` and may also define, in the same file:
+
+* ``<widget>_settings(given)``: its own settings, checked (which document, which album);
+* ``<widget>_action(ctx, action)``: a change, with ``ctx.payload`` (the text to save), returning a
+  small dict for the dashboard or None;
+* ``<widget>_file(ctx, name)``: one file it shows (a photo), as ``(bytes, media type)``, read as the viewer.
+
+Each widget on a board passes its own settings, so two notes widgets show two documents: the
+figures are kept per settings too.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import logging
@@ -43,6 +55,8 @@ ERROR_SECONDS = 15
 TONES = ("", "good", "warn", "bad")
 MAX_STATS = 8
 MAX_ITEMS = 50
+# A view's data as JSON, at most this long (a note's text, a slideshow's photo list).
+MAX_VIEW = 400_000
 
 State = Literal["ok", "not_installed", "starting", "stopped", "setup", "error"]
 # Keys people paste into a widget's settings (manifest ``key``), per app and person.
@@ -90,6 +104,9 @@ class WidgetContext:
     uid: str = ""
     email: str = ""
     personal: bool = False
+    # This widget's own settings on the board (checked by ``<widget>_settings``), and what an action sends.
+    settings: dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
 
     @property
     def name(self) -> str:
@@ -127,10 +144,21 @@ class WidgetContext:
         else:
             found = SecretStore(self.paths).get("connector", person_connectors.instance_id(connector, self.uid)) or {}
         if not found:
+            self.require_connection(connector)
             raise NeedsSetup(
                 f"Open {self.name} once so Mu3Lab can show your own figures here; they appear within a few minutes."
             )
         return {str(key): str(value) for key, value in found.items()}
+
+    def require_connection(self, connector: str) -> None:
+        """Raise ``NeedsSetup`` naming the fix when the app's chat connection, whose key the widget
+        borrows, is switched off: no key exists for anyone until it is on."""
+        state = ControlState.runtime()
+        runtime = state.mcp_server(connector) if state is not None else None
+        if not (runtime and runtime.get("enabled")):
+            raise NeedsSetup(
+                f"Turn on {self.name}'s chat connection (Apps, {self.name}, Chat) so Mu3Lab can show its figures here."
+            )
 
     def key(self) -> str:
         """The key pasted into this widget's settings (manifest ``key``); ``NeedsSetup`` until there is one."""
@@ -313,7 +341,39 @@ def figures(data: Any) -> dict[str, Any]:
         "items_title": _text(data.get("items_title"), 60),
         "empty": _text(data.get("empty"), 120),
         "note": _text(data.get("note"), 200),
+        "view": _view(data.get("view")),
     }
+
+
+def _view(value: Any) -> dict[str, Any]:
+    """A widget's own view data: plain JSON, not too long; anything else is dropped."""
+    if not isinstance(value, dict):
+        return {}
+    try:
+        text = json.dumps(value)
+    except (TypeError, ValueError):
+        return {}
+    return value if len(text) <= MAX_VIEW else {}
+
+
+def own_settings(kind: str, given: dict[str, Any]) -> dict[str, Any]:
+    """An app widget's own settings, checked by its ``<widget>_settings`` (none when it has none)."""
+    app_id, _, widget_id = kind.partition(SEPARATOR)
+    catalog = cached()
+    if app_id not in catalog:
+        return {}
+    app = catalog.get(app_id)
+    spec = next((item for item in app.manifest.widgets if item.id == widget_id), None)
+    if spec is None or spec.view == "figures":
+        return {}
+    try:
+        checked = _reader(app, spec, "_settings")(given)
+    except WidgetError:
+        return {}
+    except Exception:  # the app's own checker failing must not lose the whole board
+        LOG.exception("Home widget %s settings check failed", kind)
+        return {}
+    return checked if isinstance(checked, dict) else {}
 
 
 _modules: dict[str, tuple[float, ModuleType]] = {}
@@ -353,10 +413,30 @@ def _reachable(widget: Offered, service_state: str) -> tuple[State, str]:
     return "stopped", f"{name} is stopped."
 
 
-def _context(widget: Offered, *, is_admin: bool, uid: str, email: str, paths: RuntimePaths | None) -> WidgetContext:
+def _context(
+    widget: Offered,
+    *,
+    is_admin: bool,
+    uid: str,
+    email: str,
+    paths: RuntimePaths | None,
+    settings: dict[str, Any] | None = None,
+    payload: dict[str, Any] | None = None,
+) -> WidgetContext:
     return WidgetContext(
-        widget.app, is_admin, paths or RuntimePaths(), uid=uid, email=email, personal=widget.spec.personal
+        widget.app,
+        is_admin,
+        paths or RuntimePaths(),
+        uid=uid,
+        email=email,
+        personal=widget.spec.personal,
+        settings=dict(settings or {}),
+        payload=dict(payload or {}),
     )
+
+
+def _checked(widget: Offered, settings: Any) -> dict[str, Any]:
+    return own_settings(widget.kind, settings) if isinstance(settings, dict) and settings else {}
 
 
 def read(
@@ -367,12 +447,14 @@ def read(
     uid: str = "",
     email: str = "",
     paths: RuntimePaths | None = None,
+    settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One widget's figures and state, from the cache while they are fresh."""
     app = widget.app
     reply: dict[str, Any] = {"app_id": app.id, "app_name": app.manifest.name, "updated_at": 0.0}
     state, detail = _reachable(widget, service_state)
-    key = _key(widget, is_admin=is_admin, uid=uid)
+    own = _checked(widget, settings)
+    key = _key(widget, is_admin=is_admin, uid=uid, settings=own)
     if state in ("stopped", "starting"):
         return _with_saved(reply | {"state": state, "detail": detail}, key, paths)
     if state != "ok":
@@ -383,7 +465,9 @@ def read(
         if hit and now < hit[1]:
             return hit[2]
     try:
-        raw = _reader(app, widget.spec)(_context(widget, is_admin=is_admin, uid=uid, email=email, paths=paths))
+        raw = _reader(app, widget.spec)(
+            _context(widget, is_admin=is_admin, uid=uid, email=email, paths=paths, settings=own)
+        )
         result = reply | {"state": "ok", "detail": "", "updated_at": now} | figures(raw)
         keep = max(5.0, widget.spec.refresh_seconds * 0.8)
         _remember(key, result, paths)
@@ -403,9 +487,13 @@ def read(
     return result
 
 
-def _key(widget: Offered, *, is_admin: bool, uid: str) -> tuple[str, str]:
+def _key(widget: Offered, *, is_admin: bool, uid: str, settings: dict[str, Any] | None = None) -> tuple[str, str]:
     # Personal figures are each person's; the rest are the same for every administrator, or everyone.
-    return (widget.kind, uid if widget.spec.personal else "admin" if is_admin else "member")
+    owner = uid if widget.spec.personal else "admin" if is_admin else "member"
+    if settings:
+        # Two widgets of one kind with different settings (two documents) are kept apart.
+        owner += "#" + hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:16]
+    return (widget.kind, owner)
 
 
 def _saved_name(key: tuple[str, str]) -> str:
@@ -416,7 +504,7 @@ def _saved_name(key: tuple[str, str]) -> str:
 # written on every refresh; and what was last read back, so a stopped app's widget is not a database read.
 _written: dict[tuple[str, str], tuple[str, float]] = {}
 _saved: dict[tuple[str, str], dict[str, Any]] = {}
-FIELDS = ("stats", "items", "items_title", "empty", "note")
+FIELDS = ("stats", "items", "items_title", "empty", "note", "view")
 
 
 def _remember(key: tuple[str, str], result: dict[str, Any], paths: RuntimePaths | None) -> None:
@@ -473,13 +561,30 @@ def forget(kind: str) -> None:
 
 
 def act(
-    widget: Offered, action: str, *, is_admin: bool, uid: str = "", email: str = "", paths: RuntimePaths | None = None
-) -> None:
-    """Do what a ticked box asks (``<widget>_action`` in the app's ``widgets.py``), then read afresh."""
+    widget: Offered,
+    action: str,
+    *,
+    is_admin: bool,
+    uid: str = "",
+    email: str = "",
+    paths: RuntimePaths | None = None,
+    settings: dict[str, Any] | None = None,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Do what a ticked box asks, or a view's change (``<widget>_action`` in the app's ``widgets.py``),
+    then read afresh. What the action answers (a new document's id) goes back to the dashboard."""
     try:
-        _reader(widget.app, widget.spec, "_action")(
-            _context(widget, is_admin=is_admin, uid=uid, email=email, paths=paths), action
+        context = _context(
+            widget,
+            is_admin=is_admin,
+            uid=uid,
+            email=email,
+            paths=paths,
+            settings=_checked(widget, settings),
+            payload=payload,
         )
+        answer = _reader(widget.app, widget.spec, "_action")(context, action)
+        return _view(answer)
     except WidgetError:
         raise
     except Exception:  # the reader's own bug: logged, never shown with its details
@@ -487,6 +592,32 @@ def act(
         raise WidgetError(f"{widget.app.manifest.name} did not take the change.") from None
     finally:
         forget(widget.kind)
+
+
+def file(
+    widget: Offered,
+    name: str,
+    *,
+    is_admin: bool,
+    uid: str = "",
+    email: str = "",
+    paths: RuntimePaths | None = None,
+    settings: dict[str, Any] | None = None,
+) -> tuple[bytes, str]:
+    """One file a widget shows (``<widget>_file``), read from the app as the viewer: (bytes, media type)."""
+    try:
+        context = _context(
+            widget, is_admin=is_admin, uid=uid, email=email, paths=paths, settings=_checked(widget, settings)
+        )
+        content, media = _reader(widget.app, widget.spec, "_file")(context, name)
+    except WidgetError:
+        raise
+    except Exception:  # the reader's own bug: logged, never shown with its details
+        LOG.exception("Home widget file %s failed", widget.kind)
+        raise WidgetError(f"{widget.app.manifest.name} did not give that file.") from None
+    if not isinstance(content, bytes) or not str(media).startswith("image/"):
+        raise WidgetError(f"{widget.app.manifest.name} gave something Mu3Lab will not show.")
+    return content, str(media)
 
 
 def save_key(widget: Offered, key: str, *, uid: str, paths: RuntimePaths | None = None) -> None:

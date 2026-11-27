@@ -115,6 +115,10 @@ registration:
   socialLogins: [openid]
 
 endpoints:
+  agents:
+    # The main assistant hands each app's questions to that app's agent, one per connected app.
+    # LibreChat allows 10 by default, too few for a household with many apps: its ceiling is 50.
+    maxSubagents: 50
   custom:
   # Every model comes through Mu3Lab's AI gateway (LiteLLM) with LibreChat's own key.
   - name: Mu3Lab

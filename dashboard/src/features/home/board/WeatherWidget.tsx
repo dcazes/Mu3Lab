@@ -114,8 +114,19 @@ export function PlacePicker({ onPick }: { onPick: (place: PlaceSettings) => void
   );
 }
 
+interface WeatherSettingsValue {
+  units?: string;
+  days?: number;
+  place?: PlaceSettings;
+}
+
+// How many days the forecast can show (the server keeps two weeks).
+const DAY_CHOICES = [3, 5, 7, 10, 14];
+const daysOf = (settings: WeatherSettingsValue) =>
+  DAY_CHOICES.includes(Number(settings.days)) ? Number(settings.days) : 7;
+
 export function WeatherSettings({ widget, onChange }: SettingsProps) {
-  const settings = widget.settings as { units?: string; place?: PlaceSettings };
+  const settings = widget.settings as WeatherSettingsValue;
   return (
     <>
       <div className="widget-setting">
@@ -143,13 +154,30 @@ export function WeatherSettings({ widget, onChange }: SettingsProps) {
           ))}
         </div>
       </div>
+      <div className="widget-setting">
+        <span className="widget-setting-label">Days</span>
+        <div className="segmented" role="radiogroup" aria-label="Days in the forecast">
+          {DAY_CHOICES.map((days) => (
+            <button
+              key={days}
+              type="button"
+              role="radio"
+              aria-checked={daysOf(settings) === days}
+              onClick={() => onChange({ ...settings, days })}
+            >
+              {days}
+            </button>
+          ))}
+        </div>
+        <p className="muted widget-setting-hint">At most this many; a small widget shows the days that fit.</p>
+      </div>
     </>
   );
 }
 
 export function WeatherWidget({ widget, onConfigure }: WidgetProps) {
   const box = useBox();
-  const settings = widget.settings as { units?: string; place?: PlaceSettings };
+  const settings = widget.settings as WeatherSettingsValue;
   const place = settings.place;
   const path = place
     ? `/api/v1/home/weather?latitude=${place.latitude}&longitude=${place.longitude}&units=${settings.units || 'celsius'}`
@@ -167,7 +195,7 @@ export function WeatherWidget({ widget, onConfigure }: WidgetProps) {
   if (!data) return error ? <p className="widget-error">{error}</p> : <p className="muted">Loading…</p>;
   const now = look(data.code);
   const Icon = data.is_day ? now.day : now.night;
-  const days = data.days.slice(0, 7);
+  const days = data.days.slice(0, daysOf(settings));
   // The week's coldest and warmest, for each day's bar in the list.
   const lows = days.map((day) => day.low).filter((value): value is number => value != null);
   const highs = days.map((day) => day.high).filter((value): value is number => value != null);

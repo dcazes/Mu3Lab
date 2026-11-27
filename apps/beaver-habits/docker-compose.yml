@@ -2,7 +2,7 @@ name: mu3lab-beaver-habits
 
 services:
   beaver:
-    image: daya0576/beaverhabits:0.10.0@sha256:d39bea489faedfbc55a29bb73bd8bd1845f52e406dd77ba264bd20ba1439e1e8
+    image: daya0576/beaverhabits:0.10.1@sha256:a924af2bb5db56d44210b4cc8935233fb0a71731a6748c244391405ebd3cc3d2
     restart: unless-stopped
     ports: ["127.0.0.1:8086:8080"]
     environment:
@@ -28,7 +28,7 @@ services:
 
   # The image runs as "nobody"; a folder Docker creates belongs to root.
   data-init:
-    image: daya0576/beaverhabits:0.10.0@sha256:d39bea489faedfbc55a29bb73bd8bd1845f52e406dd77ba264bd20ba1439e1e8
+    image: daya0576/beaverhabits:0.10.1@sha256:a924af2bb5db56d44210b4cc8935233fb0a71731a6748c244391405ebd3cc3d2
     restart: "no"
     user: "0:0"
     entrypoint: ["chown", "-R", "nobody:nogroup", "/app/.user"]

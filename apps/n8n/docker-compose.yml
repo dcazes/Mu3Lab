@@ -2,7 +2,7 @@ name: mu3lab-n8n
 
 services:
   n8n:
-    image: n8nio/n8n:2.48.5@sha256:c0ea1246a81a34ce8e2b3cfb1f718b97de64b0a1b3747ad24d6d431826bb71ad
+    image: n8nio/n8n:2.49.7@sha256:17a3e5a8c5e2a7440cc757f5392d57b50eefdfd46eac4532a7dea9bf2735d9ae
     restart: unless-stopped
     ports: ["127.0.0.1:5678:5678"]
     environment:
@@ -58,7 +58,7 @@ services:
 
   # Runs the JavaScript and Python of Code nodes, away from n8n and with no way out to the internet.
   runners:
-    image: n8nio/runners:2.48.5@sha256:3d502b6dcb975958df66f80ceb59d30584e86d7339a4659730d3ecfb74c91fc0
+    image: n8nio/runners:2.49.7@sha256:be8031ab2badedb7af0ceb68ea46ac5317bb941c06f97b3f0e9bc3bc2b67050e
     restart: unless-stopped
     environment:
       N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:?N8N_RUNNERS_AUTH_TOKEN is required}
@@ -92,7 +92,7 @@ services:
 
   # n8n runs as node (1000); a folder Docker creates belongs to root.
   home-init:
-    image: n8nio/n8n:2.48.5@sha256:c0ea1246a81a34ce8e2b3cfb1f718b97de64b0a1b3747ad24d6d431826bb71ad
+    image: n8nio/n8n:2.49.7@sha256:17a3e5a8c5e2a7440cc757f5392d57b50eefdfd46eac4532a7dea9bf2735d9ae
     restart: "no"
     user: "0:0"
     entrypoint: ["chown", "-R", "1000:1000", "/home/node/.n8n"]

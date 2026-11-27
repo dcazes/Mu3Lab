@@ -20,8 +20,11 @@ widgets:
   refresh_seconds: 300
   largest: [12, 10]
   start: [4, 4]
-version: "v3.0.2.5780"
+version: "v3.1.0.5799"
 upstream: Prowlarr/Prowlarr
+# Its image tags add a build counter to the release number (newer releases, ctl/lifecycle/upstream.py).
+upstream_tags:
+  prowlarr: "{version}-ls*"
 backup:
   ignore:
   - prowlarr/config/logs

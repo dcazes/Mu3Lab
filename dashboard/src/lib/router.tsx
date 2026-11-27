@@ -18,8 +18,9 @@ function subscribe(onChange: () => void) {
 }
 
 export function navigate(path: string, { replace = false } = {}) {
-  if (replace) window.history.replaceState({}, '', path);
-  else window.history.pushState({}, '', path);
+  // Each page remembers the page it was opened from, so its way back can lead there.
+  if (replace) window.history.replaceState(window.history.state, '', path);
+  else window.history.pushState({ from: resolvePath(window.location.pathname) }, '', path);
   window.dispatchEvent(new PopStateEvent('popstate'));
   window.scrollTo({ top: 0 });
 }
@@ -27,6 +28,12 @@ export function navigate(path: string, { replace = false } = {}) {
 export function resolvePath(path: string): string {
   const trimmed = path.length > 1 ? path.replace(/\/+$/, '') : path;
   return REDIRECTS[trimmed] || trimmed;
+}
+
+/** The page this one was opened from inside the dashboard; empty when it was opened directly. */
+export function cameFrom(): string {
+  const state: unknown = window.history.state;
+  return state && typeof state === 'object' && 'from' in state && typeof state.from === 'string' ? state.from : '';
 }
 
 export function usePath(): string {

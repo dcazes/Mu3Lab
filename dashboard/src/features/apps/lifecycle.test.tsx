@@ -67,4 +67,25 @@ describe('Select mode on the app stacks', () => {
       ),
     );
   });
+
+  it('picks apps one by one in the list view too', () => {
+    const all = apps({ surfsense: stopped });
+    renderWithDashboard(
+      <AppStacks
+        services={all}
+        listRow={(item) => (
+          <a key={item.id} href={`/apps/${item.id}`}>
+            {item.name}
+          </a>
+        )}
+      />,
+      dashboardData(all),
+    );
+    expect(screen.queryByRole('button', { name: /^SurfSense/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    const row = screen.getByRole('button', { name: /^SurfSense/ });
+    fireEvent.click(row);
+    expect(row).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('region', { name: 'Selected apps' })).toHaveTextContent('1 selected · SurfSense');
+  });
 });

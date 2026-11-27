@@ -77,7 +77,7 @@ sbom:
 
 # check-updates / approve: the maintainer's release review. See tools/approve_release.py.
 check-updates:
-	$(RUN) python -m tools.approve_release check
+	GITHUB_TOKEN="$${GITHUB_TOKEN:-$$(gh auth token 2>/dev/null)}" $(RUN) python -m tools.approve_release check
 
 approve:
 	@[ -n "$(APP)" ] && [ -n "$(VERSION)" ] || { echo 'usage: make approve APP=mealie VERSION=v3.23.0 [IMAGES="service=registry/name:tag"]'; exit 2; }

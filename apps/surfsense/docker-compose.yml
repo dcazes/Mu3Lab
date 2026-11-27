@@ -5,7 +5,7 @@ name: mu3lab-surfsense
 # household; Authentik on Mu3Lab's ingress is the only way in.
 services:
   surfsense:
-    image: ghcr.io/modsetter/surfsense:2.3.1@sha256:106baa89d5f79168c1c5e9bce77655d3e99f2950250772a1d41508c04d73a4a0
+    image: ghcr.io/modsetter/surfsense:2.4.0@sha256:8e8686e27f40d6b606044451938cb7f961a9c7f628ce45e30ec71c58d8c093ef
     restart: unless-stopped
     ports: ["127.0.0.1:3929:80"]
     environment:
@@ -40,7 +40,7 @@ services:
 
   # The image runs as "surfsense" (1000); a folder Docker creates belongs to root.
   data-init:
-    image: ghcr.io/modsetter/surfsense:2.3.1@sha256:106baa89d5f79168c1c5e9bce77655d3e99f2950250772a1d41508c04d73a4a0
+    image: ghcr.io/modsetter/surfsense:2.4.0@sha256:8e8686e27f40d6b606044451938cb7f961a9c7f628ce45e30ec71c58d8c093ef
     restart: "no"
     user: "0:0"
     entrypoint: ["chown", "-R", "1000:1000", "/data"]
@@ -49,7 +49,9 @@ services:
     network_mode: none
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    cap_add: [CHOWN]
+    # DAC_READ_SEARCH lets root look inside the 0700 folders SurfSense makes (home/.config,
+    # home/.local); without it chown fails on every start after the first.
+    cap_add: [CHOWN, DAC_READ_SEARCH]
 
 networks:
   mu3lab_frontend: {external: true}

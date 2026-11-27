@@ -52,8 +52,10 @@ def stop(service: Service, root: Path, log: Log) -> None:
 def start(service: Service, root: Path, log: Log, *, build: bool = False) -> tuple[bool, str]:
     """Start the app and wait for its health check; returns (healthy, why not).
 
-    ``build`` rebuilds the images Mu3Lab builds from source, for an update that brought new files.
+    ``build`` rebuilds the images Mu3Lab builds from source, for an update that brought new files;
+    only when those files differ from what the images were last built from (``ctl.lifecycle.builds``).
     """
+    from ctl.lifecycle import builds
     from ctl.mcp_ops import sync_application
 
     folder = project(service, root)
@@ -61,6 +63,12 @@ def start(service: Service, root: Path, log: Log, *, build: bool = False) -> tup
         env, extra = compose_settings.settings(service, folder)
     except RuntimeError as exc:
         return False, str(exc)
+    if build:
+        build = builds.needed(service.id, folder)
+        if build:
+            builds.forget(service.id)  # until this build finishes, nothing says what the images hold
+        elif builds.fingerprints(folder):
+            log(f"{service.name}'s own images already match its files; they are not rebuilt.")
     # An app whose first start is known to take longer (RomM) asks for more.
     wait = max(START_TIMEOUT, service.manifest.service.start_timeout_seconds)
     # Orphans: a service a new release dropped (Dawarich's Sidekiq worker) must
@@ -77,6 +85,8 @@ def start(service: Service, root: Path, log: Log, *, build: bool = False) -> tup
     )
     if rc:
         return False, output[-500:]
+    if build:
+        builds.remember(service.id, folder)
     healthy, detail = wait_healthy(service, timeout=wait)
     if not healthy:
         return False, detail

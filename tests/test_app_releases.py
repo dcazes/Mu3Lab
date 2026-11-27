@@ -117,6 +117,7 @@ class ApprovalTests(_Machine):
             {
                 "installed_version": "v3.22.0",
                 "approved_version": "v3.23.0",
+                "source": "mu3lab",
                 "update_available": True,
                 "supporting_only": False,
                 "files_only": False,

@@ -77,7 +77,7 @@ describe('Home board', () => {
     fireEvent.click(within(panel).getByRole('button', { name: /^Stocks/ }));
     fireEvent.click(within(panel).getByRole('button', { name: 'Add to board' }));
     // A widget with settings opens them straight away.
-    const settings = screen.getByRole('complementary', { name: 'Stocks settings' });
+    const settings = screen.getByRole('dialog', { name: 'Stocks settings' });
     fireEvent.change(within(settings).getByRole('textbox', { name: 'Ticker symbol' }), { target: { value: 'aapl' } });
     fireEvent.click(within(settings).getByRole('button', { name: 'Add' }));
     expect(within(settings).getByRole('button', { name: 'Remove AAPL' })).toBeInTheDocument();
@@ -356,6 +356,18 @@ describe('App page', () => {
     expect(screen.getByRole('button', { name: 'Start' })).toHaveClass('btn-primary');
     expect(screen.queryByRole('link', { name: /Open/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Nextcloud actions' })).not.toBeInTheDocument();
+  });
+
+  it('leads back to Home when it was opened from Home, and to Apps otherwise', () => {
+    stubFetch(() => ({ ok: true, servers: [], summary: {}, policy: '' }));
+    const nextcloud = service('nextcloud', 'Nextcloud', 'optional', { identity: identity() });
+    window.history.pushState({ from: '/' }, '', '/apps/nextcloud');
+    renderWithDashboard(<AppDetailPage id="nextcloud" tab="overview" />, dashboardData([nextcloud]));
+    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/');
+    cleanup();
+    window.history.pushState({ from: '/chat' }, '', '/apps/nextcloud');
+    renderWithDashboard(<AppDetailPage id="nextcloud" tab="overview" />, dashboardData([nextcloud]));
+    expect(screen.getByRole('link', { name: 'Apps' })).toHaveAttribute('href', '/apps');
   });
 
   it('opens the Authentik-gated FreeLLMAPI dashboard alongside provider management', () => {

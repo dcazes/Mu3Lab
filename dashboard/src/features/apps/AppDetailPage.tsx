@@ -9,7 +9,7 @@ import { Badge, Dot, StatusBadge } from '../../components/Status';
 import { CopyField } from '../../components/CopyField';
 import { bytes, humanize, relativeTime } from '../../lib/format';
 import { useAction } from '../../lib/useAction';
-import { Link } from '../../lib/router';
+import { cameFrom, Link } from '../../lib/router';
 import { isInstalled, isRunning, isWorking, launchTarget, statusText } from '../../lib/services';
 import { useApi } from '../../lib/useApi';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
@@ -318,7 +318,11 @@ export function AppDetailPage({ id, tab }: { id: string; tab: string }) {
   return (
     <div className="page">
       <PageHeader
-        breadcrumb={{ label: 'Apps', to: installed ? '/apps' : '/apps/discover' }}
+        breadcrumb={
+          cameFrom() === '/'
+            ? { label: 'Home', to: '/' }
+            : { label: 'Apps', to: installed ? '/apps' : '/apps/discover' }
+        }
         title={
           <span className="title-with-icon">
             <AppIcon id={service.id} size="xl" />

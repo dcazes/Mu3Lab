@@ -23,7 +23,16 @@ widgets:
   refresh_seconds: 1800
   largest: [12, 6]
   start: [4, 3]
-version: "v3.3.6"
+- id: slideshow
+  title: Slideshow
+  description: Your own photos one after another - an album, favourites, this day in past years, or a random pick.
+  personal: true
+  view: slideshow
+  refresh_seconds: 900
+  smallest: [2, 2]
+  largest: [12, 14]
+  start: [4, 4]
+version: "v3.4.2"
 upstream: immich-app/immich
 service:
   uses_gpu: true

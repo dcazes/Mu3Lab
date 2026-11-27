@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, type LucideIcon } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
-import { Link, usePath } from '../lib/router';
+import { cameFrom, Link, usePath } from '../lib/router';
 
 export function PageHeader({
   title,
@@ -17,7 +17,17 @@ export function PageHeader({
     <header className="page-header">
       <div className="page-header-text">
         {breadcrumb && (
-          <Link to={breadcrumb.to} className="breadcrumb">
+          <Link
+            to={breadcrumb.to}
+            className="breadcrumb"
+            onClick={(event) => {
+              // Back to the page this one was opened from: a step back, so its scroll position returns too.
+              const plain = !event.metaKey && !event.ctrlKey && !event.shiftKey && event.button === 0;
+              if (!plain || cameFrom() !== breadcrumb.to) return;
+              event.preventDefault();
+              window.history.back();
+            }}
+          >
             <ChevronLeft />
             {breadcrumb.label}
           </Link>

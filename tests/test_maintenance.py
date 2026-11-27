@@ -76,6 +76,10 @@ class _Workflow(unittest.TestCase):
         for module in (restore, update):
             self.stack.enter_context(patch.object(module, "data_directories", return_value=[self.live]))
         self.download = self.stack.enter_context(patch.object(app_releases, "download"))
+        self.update_download = self.stack.enter_context(patch("ctl.update_downloads.ensure"))
+        # What works before an update (sign-in, chat connections, widgets); none here unless a test says so.
+        self.working = self.stack.enter_context(patch.object(update.update_checks, "baseline", return_value=[]))
+        self.broken = self.stack.enter_context(patch.object(update.update_checks, "regressions", return_value=[]))
         self.stack.enter_context(patch.object(update, "render_service", side_effect=self.new_definition))
         self.stack.enter_context(patch.object(app_releases, "align"))
         self.validate = self.stack.enter_context(patch.object(update, "_validate"))
@@ -291,6 +295,56 @@ class UpdateTests(_Workflow):
         self.assertIn("Backup cccccccc", job["detail"])
         self.assertEqual(in_progress.get("mealie", self.paths), {})
 
+    def test_an_update_that_breaks_what_worked_before_is_put_back(self):
+        self.listing = [
+            {"id": PRE_UPDATE, "time": "2026-10-01T12:00:00Z", "version": OLD.version, "paths": ["/data/mealie"]}
+        ]
+        self.working.return_value = ["sign-in", "chat connection Mealie"]
+        self.broken.return_value = ["chat connection Mealie"]
+        job = self.job("update", target_version=NEW.version)
+        self.assertEqual(job["error_code"], "update_rolled_back", job["detail"])
+        self.assertIn("chat connection Mealie stopped working", job["detail"])
+        self.assertEqual(self.installed(), OLD)
+        self.assertEqual(self.data(), "from c")  # the data from just before the update
+        self.assertEqual(self.events, ["stop", "dump", "start v3.23.0", "stop", "start v3.22.0"])
+        self.assertEqual(in_progress.get("mealie", self.paths), {})
+        self.broken.assert_called_once_with(self.service, self.root, ["sign-in", "chat connection Mealie"], ANY)
+
+    def upstream_release(self) -> Release:
+        found = Release("v3.24.0", {"mealie": "ghcr.io/mealie-recipes/mealie:v3.24.0@sha256:up"})
+        records.put(
+            "upstream-releases",
+            "mealie",
+            {"state": "ready", "version": found.version, "images": {"cpu": found.images}, "failed": {}},
+            self.paths,
+        )
+        return found
+
+    def test_a_newer_release_from_the_makers_that_passed_the_checks_is_the_update(self):
+        found = self.upstream_release()
+        stale = self.job("update", target_version=NEW.version)
+        self.assertEqual(stale["error_code"], "approval_changed")
+        job = self.job("update", target_version=found.version)
+        self.assertEqual(job["state"], "succeeded", job["detail"])
+        self.assertEqual(self.installed().images, found.images)
+        self.assertEqual(self.installed().version, "v3.24.0")
+
+    def test_a_release_from_the_makers_that_breaks_something_is_never_offered_again(self):
+        found = self.upstream_release()
+        self.listing = [
+            {"id": PRE_UPDATE, "time": "2026-10-01T12:00:00Z", "version": OLD.version, "paths": ["/data/mealie"]}
+        ]
+        self.working.return_value = ["sign-in"]
+        self.broken.return_value = ["sign-in"]
+        job = self.job("update", target_version=found.version)
+        self.assertEqual(job["error_code"], "update_rolled_back", job["detail"])
+        self.assertEqual(self.installed(), OLD)
+        kept = records.get("upstream-releases", "mealie", self.paths)
+        self.assertEqual(kept["state"], "held")
+        self.assertIn("v3.24.0", kept["failed"])
+        # Mu3Lab's own approved release is offered instead.
+        self.assertEqual(app_releases.status(self.service, self.root, self.paths)["approved_version"], NEW.version)
+
     def test_a_core_app_updates_the_same_way_but_is_not_restored_here(self):
         self.service = dataclasses.replace(self.service, stage="core")
         job = self.job("update", target_version=NEW.version)
@@ -325,13 +379,22 @@ class UpdateTests(_Workflow):
         with self.store._connect() as conn:
             return [dict(row) for row in conn.execute("SELECT event, detail FROM job_events WHERE event = 'log'")]
 
-    def test_mu3lab_changes_to_the_apps_files_update_it_the_same_way(self):
+    def test_mu3lab_changes_to_the_apps_files_update_it_without_a_data_backup(self):
+        # The same images: the same program cannot have migrated the data; the deployment copy is the undo.
         app_releases.write("mealie", NEW)  # the approved release, with files from an older Mu3Lab
         job = self.job("update", target_version=NEW.version)
         self.assertEqual(job["state"], "succeeded", job["detail"])
-        self.assertEqual(self.events, ["stop", "dump", "start v3.23.0"])
+        self.assertEqual(self.events, ["stop", "start v3.23.0"])
         self.assertEqual(self.builds, [True])
         self.assertIn("Updated Mealie with Mu3Lab's latest changes to it", job["detail"])
+        self.assertNotIn("Backup", job["detail"])
+
+    def test_mu3lab_changes_to_images_it_builds_back_the_data_up_first(self):
+        app_releases.write("mealie", NEW)
+        with patch("ctl.lifecycle.builds.needed", return_value=True):
+            job = self.job("update", target_version=NEW.version)
+        self.assertEqual(job["state"], "succeeded", job["detail"])
+        self.assertEqual(self.events, ["stop", "dump", "start v3.23.0"])
         self.assertIn("Backup cccccccc", job["detail"])
 
     def test_a_release_that_does_not_start_is_put_back_with_its_files_and_data(self):

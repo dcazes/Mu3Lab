@@ -28,7 +28,7 @@ from ctl.backups import readiness as backup_readiness
 from ctl.backups import snapshots as list_backups
 from ctl.control_state import ControlState
 from ctl.jobs import JobStore, redact
-from ctl.lifecycle import app_releases, compute_switch, in_progress
+from ctl.lifecycle import app_releases, compute_switch, in_progress, upstream
 from ctl.lifecycle import restore as app_restore
 from ctl.lifecycle.maintenance import MAINTENANCE_ACTIONS
 from ctl.registry import Service
@@ -399,17 +399,33 @@ def _release(service: Service) -> dict[str, object]:
     elif not backup_readiness().get("available"):
         reason = "Updates need Docker to save a backup first."
     repository = str(service.update.get("repository", ""))
+    found = upstream.record(service.id) if upstream.eligible(service) else {}
     notes = (
-        f"https://github.com/{repository}/releases/tag/{release['approved_version']}"
+        str(found.get("release_url") or "")
+        if release.get("source") == "upstream"
+        else f"https://github.com/{repository}/releases/tag/{release['approved_version']}"
         if repository and release["approved_version"]
         else ""
     )
     return {
+        "source": "mu3lab",
         **release,
         "repository": repository,
         "release_url": notes,
         "update_enabled": release["update_available"] and not reason,
         "blocked_reason": reason,
+        # What this server last found from the app's makers (ctl/lifecycle/upstream.py).
+        "upstream": (
+            {
+                "version": str(found.get("version") or ""),
+                "state": str(found.get("state") or ""),
+                "reasons": [str(item) for item in found.get("reasons") or []][:8],
+                "checked_at": str(found.get("checked_at") or ""),
+                "release_url": str(found.get("release_url") or ""),
+            }
+            if found
+            else None
+        ),
     }
 
 
@@ -417,6 +433,23 @@ def _release(service: Service) -> dict[str, object]:
 def service_updates(service_id: str, _operator: Member) -> models.UpdateResponse:
     """Compare the installed release with the one Mu3Lab approves; no network needed."""
     return models.UpdateResponse.model_validate({"ok": True, **_release(runtime.service(service_id))})
+
+
+@router.post("/{service_id}/updates/check", response_model=models.UpdateResponse, response_model_exclude_none=True)
+def check_service_updates(service_id: str, operator: OperatorMutation) -> models.UpdateResponse:
+    """Look for a newer release from the app's makers now, and screen it, instead of waiting for the daily check."""
+    if not operator.get("is_admin"):
+        raise ApiError(403, "Only a Mu3Lab administrator can do this.", code="admin_required")
+    service = runtime.service(service_id)
+    if not upstream.eligible(service):
+        raise ApiError(409, f"Mu3Lab doesn't look for newer releases of {service.name} itself.")
+    if app_releases.installed(service, ROOT) is None:
+        raise ApiError(409, f"Install {service.name} first.")
+    try:
+        upstream.check(service, ROOT, lambda _line: None, force=True)
+    except upstream.CheckFailed as exc:
+        raise ApiError(503, f"Mu3Lab could not check for a newer release right now: {exc}") from exc
+    return models.UpdateResponse.model_validate({"ok": True, **_release(service)})
 
 
 @router.get("/{service_id}/backups", response_model=models.BackupsResponse, response_model_exclude_none=True)

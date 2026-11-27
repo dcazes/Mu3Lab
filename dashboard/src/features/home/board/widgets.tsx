@@ -1,19 +1,27 @@
 import {
+  ArrowLeftRight,
+  Bookmark,
   CalendarDays,
   Cctv,
+  Clock,
   CloudSun,
+  Gauge,
+  Group,
   LayoutGrid,
   type LucideIcon,
   MessageCircle,
+  Newspaper,
   Search,
   Thermometer,
   TrendingUp,
+  TrendingUpDown,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import type { HomeWidget, HomeWidgetKind } from '../../../api';
 import { AppIcon } from '../../../components/AppIcon';
-import { AppWidget, KeySettings } from './AppWidget';
+import { AppWidget, AppWidgetSettings } from './AppWidget';
 import { AppsWidget } from './AppsWidget';
+import { GroupSettings } from './GroupSettings';
 import { AskWidget } from './AskWidget';
 import { CalendarSettings, CalendarWidget } from './CalendarWidget';
 import { CameraWidget, CameraWidgetSettings } from './CameraWidget';
@@ -21,6 +29,14 @@ import { SearchWidget } from './SearchWidget';
 import { StocksSettings, StocksWidget } from './StocksWidget';
 import { ThermostatWidget } from './ThermostatWidget';
 import { WeatherSettings, WeatherWidget } from './WeatherWidget';
+import { ClockSettings, ClockWidget } from './ClockWidget';
+import { BookmarksSettings, BookmarksWidget } from './BookmarksWidget';
+import { ConvertSettings, ConvertWidget } from './ConvertWidget';
+import { RssSettings, RssWidget } from './RssWidget';
+import { ResourcesWidget } from './ResourcesWidget';
+import { MoversSettings, MoversWidget } from './MoversWidget';
+import { NotesSettings, NotesWidget } from './NotesWidget';
+import { SlideshowSettings, SlideshowWidget } from './SlideshowWidget';
 
 export interface WidgetProps {
   widget: HomeWidget;
@@ -39,6 +55,8 @@ export interface WidgetInfo {
   icon: LucideIcon | ComponentType<{ className?: string }>;
   Component: ComponentType<WidgetProps>;
   Settings?: ComponentType<SettingsProps>;
+  /** Open the settings as soon as it is added (default: whenever it has settings). */
+  setUpOnAdd?: boolean;
   /** Where its title links to, when it has a page of its own. */
   to?: string;
   /** An app's widget: its title opens the app, and the Add list groups it under the app. */
@@ -95,6 +113,57 @@ export const WIDGETS: Record<string, WidgetInfo> = {
     icon: Thermometer,
     Component: ThermostatWidget,
   },
+  group: {
+    title: 'Group',
+    description: 'A titled box that keeps several widgets together. Drag widgets into it; they move with it.',
+    icon: Group,
+    Component: () => null,
+    Settings: GroupSettings,
+  },
+  clock: {
+    title: 'Clock',
+    description: 'The time here, and in up to six other places.',
+    icon: Clock,
+    Component: ClockWidget,
+    Settings: ClockSettings,
+    setUpOnAdd: false,
+  },
+  bookmarks: {
+    title: 'Links',
+    description: 'Your bookmarks as tiles or a list, a click away.',
+    icon: Bookmark,
+    Component: BookmarksWidget,
+    Settings: BookmarksSettings,
+  },
+  convert: {
+    title: 'Convert',
+    description: 'Quick conversions: length, weight, temperature, cooking, and currency at today’s rates.',
+    icon: ArrowLeftRight,
+    Component: ConvertWidget,
+    Settings: ConvertSettings,
+    setUpOnAdd: false,
+  },
+  rss: {
+    title: 'News',
+    description: 'The newest stories from the news feeds (RSS or Atom) you choose.',
+    icon: Newspaper,
+    Component: RssWidget,
+    Settings: RssSettings,
+  },
+  resources: {
+    title: 'Server',
+    description: 'This server’s processor, memory, graphics memory and drives at a glance.',
+    icon: Gauge,
+    Component: ResourcesWidget,
+  },
+  movers: {
+    title: 'Top movers',
+    description: 'A ticker of today’s biggest stock gainers, losers or most traded, or your own tickers.',
+    icon: TrendingUpDown,
+    Component: MoversWidget,
+    Settings: MoversSettings,
+    setUpOnAdd: false,
+  },
   camera: {
     title: 'Front door',
     description: 'The front-door camera, live (administrators only). Adding it sets up what it needs.',
@@ -114,7 +183,7 @@ export function widgetInfo(kind: string, kinds: readonly HomeWidgetKind[]): Widg
   const own = WIDGETS[kind];
   if (own) return own;
   const entry = kinds.find((item) => item.kind === kind);
-  const key = `${kind}|${entry?.title ?? ''}|${entry?.refresh_seconds ?? ''}`;
+  const key = `${kind}|${entry?.title ?? ''}|${entry?.refresh_seconds ?? ''}|${entry?.view ?? ''}`;
   const known = fromApps.get(key);
   if (known) return known;
   const appId = entry?.app_id ?? kind.split(':')[0];
@@ -128,14 +197,29 @@ export function widgetInfo(kind: string, kinds: readonly HomeWidgetKind[]): Widg
         </span>
       );
     },
-    Component: function Widget(props: WidgetProps) {
-      return <AppWidget {...props} kind={entry} />;
-    },
-    Settings: entry?.key_label
-      ? function Settings(props: SettingsProps) {
-          return <KeySettings {...props} kind={entry} />;
-        }
-      : undefined,
+    // Most app widgets show figures and a list; a few are drawn their own way (manifest ``view``).
+    Component:
+      entry?.view === 'notes'
+        ? function Widget(props: WidgetProps) {
+            return <NotesWidget {...props} kind={entry} />;
+          }
+        : entry?.view === 'slideshow'
+          ? function Widget(props: WidgetProps) {
+              return <SlideshowWidget {...props} kind={entry} />;
+            }
+          : function Widget(props: WidgetProps) {
+              return <AppWidget {...props} kind={entry} />;
+            },
+    Settings:
+      entry?.view === 'notes'
+        ? NotesSettings
+        : entry?.view === 'slideshow'
+          ? SlideshowSettings
+          : function Settings(props: SettingsProps) {
+              return <AppWidgetSettings {...props} kind={entry} />;
+            },
+    // A widget that takes a key, or a view that needs a choice (which document), opens its settings when added.
+    setUpOnAdd: Boolean(entry?.key_label) || entry?.view === 'notes',
     appId,
     appName: entry?.app_name ?? undefined,
   };

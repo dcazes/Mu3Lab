@@ -2,7 +2,8 @@
 
 * Library: what the household's libraries hold, what was added lately, and how many are watching now
   (a count only: who watches what stays private). Read as Mu3Lab's own Jellyfin account.
-* Continue watching: the viewer's own unfinished films and episodes, with their own Jellyfin sign-in.
+* Continue watching: the viewer's own unfinished films and episodes, read for their own Jellyfin
+  account (shown only to them).
 
 Jellyfin's current API (10.9 and later): ``/Items/Latest`` and ``/UserItems/Resume`` with ``userId``.
 """
@@ -11,12 +12,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from ctl.app_widgets import WidgetContext, WidgetError, ago
+from ctl import person_connectors
+from ctl.app_widgets import NeedsSetup, WidgetContext, WidgetError, ago
 
 SERVICE = "mu3lab-service"
 PASSWORD_ENV = "JELLYFIN_ADMIN_PASSWORD"
-CONNECTOR = "jellyfin-adapter"
-TOKEN_ENV = "JELLYFIN_TOKEN"
 CLIENT = 'MediaBrowser Client="Mu3Lab", Device="Mu3Lab widgets", DeviceId="mu3lab-widgets", Version="1"'
 TICKS = 10_000_000  # Jellyfin counts time in 100-nanosecond ticks
 # Mu3Lab's own sign-in, kept between refreshes: (token, user id).
@@ -87,14 +87,24 @@ def library(ctx: WidgetContext) -> dict[str, Any]:
     return {"stats": stats, "items_title": "Recently added", "items": items, "empty": "Nothing added yet."}
 
 
+def _viewer(ctx: WidgetContext) -> str:
+    """The viewer's Jellyfin user id: the account Mu3Lab made for them, named after their username."""
+    person = next((found for found in person_connectors.household() if found["uid"] == ctx.uid), None)
+    if person:
+        for user in _as_service(ctx, "/Users") or []:
+            if str(user.get("Name") or "").casefold() == person["username"].casefold():
+                return str(user["Id"])
+    raise NeedsSetup("Mu3Lab is still making your Jellyfin account; your shows appear here within a few minutes.")
+
+
+def _resume(ctx: WidgetContext) -> Any:
+    """Read with Mu3Lab's own (administrator) sign-in for the viewer's account, so it needs no password
+    of theirs, which they may change in Jellyfin; their library access and limits still apply."""
+    return _as_service(ctx, "/UserItems/Resume", userId=_viewer(ctx), limit=10, mediaTypes="Video")
+
+
 def continue_watching(ctx: WidgetContext) -> dict[str, Any]:
-    token = ctx.own_credentials(CONNECTOR).get(TOKEN_ENV, "")
-    me = ctx.get("/Users/Me", headers=_headers(token))
-    resume = ctx.get(
-        "/UserItems/Resume",
-        params={"userId": me["Id"], "limit": 10, "mediaTypes": "Video"},
-        headers=_headers(token),
-    )
+    resume = _resume(ctx)
     items = []
     for item in (resume or {}).get("Items") or []:
         title, subtitle = _describe(item)

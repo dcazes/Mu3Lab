@@ -68,7 +68,7 @@ def switch(
         raise SwitchFailed(
             f"{service.name} already runs its {LABELS.get(variant, variant)} version.", "already_current"
         )
-    target = app_releases.approved(service, root, variant)
+    target = app_releases.target(service, root, variant, paths)
     if target.version != previous.version:
         raise SwitchFailed(
             f"{service.name} {previous.version} has no {LABELS.get(variant, variant)} version here; "

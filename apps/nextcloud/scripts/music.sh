@@ -21,6 +21,9 @@ if [ "${MU3LAB_MUSIC_SHARED:-0}" = 1 ]; then
   # is never), so songs Navidrome's library gains elsewhere show up.
   occ files_external:option "$(existing)" filesystem_check_changes 1 >/dev/null \
     || { echo "MU3LAB_ERROR Nextcloud could not keep the Music folder up to date"; exit 3; }
+  # Let people share songs and albums from it (external storage allows no sharing by default).
+  occ files_external:option "$(existing)" enable_sharing true >/dev/null \
+    || { echo "MU3LAB_ERROR Nextcloud could not allow sharing from the Music folder"; exit 3; }
 else
   if occ app:list --output=json 2>/dev/null | grep -q '"files_external"'; then
     id=$(existing)

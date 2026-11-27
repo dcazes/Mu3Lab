@@ -258,8 +258,18 @@ class JobStore:
         if state == "queued":
             signals.nudge()
 
-    def claim(self, worker_id: str, *, lease_seconds: int = 45) -> dict[str, Any] | None:
-        """Atomically claim the oldest queued job or reclaim an expired runner."""
+    def claim(
+        self,
+        worker_id: str,
+        *,
+        lease_seconds: int = 45,
+        accept: Callable[[dict[str, Any]], bool] | None = None,
+    ) -> dict[str, Any] | None:
+        """Atomically claim the oldest queued job or reclaim an expired runner.
+
+        ``accept`` (while other jobs run): the oldest job is claimed only if it may run beside
+        them; otherwise nothing is, so jobs still start in the order they were asked for.
+        """
         if not worker_id or lease_seconds < 10:
             raise ValueError("invalid worker lease")
         now = _now()
@@ -297,7 +307,7 @@ class JobStore:
             """,
                 (now,),
             ).fetchone()
-            if not row:
+            if not row or (accept is not None and not accept(dict(row))):
                 return None
             conn.execute(
                 """
@@ -371,11 +381,11 @@ class JobStore:
         return [dict(row) for row in rows]
 
     def active_jobs(self) -> list[dict[str, Any]]:
-        """Every job still queued, running or waiting, however old."""
+        """Every job still queued, running or waiting, however old; newest first, the reverse of the worker's turn order."""
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM jobs WHERE state IN ('queued', 'running', 'waiting_for_confirmation') "
-                "ORDER BY created_at DESC"
+                "ORDER BY created_at DESC, rowid DESC"
             ).fetchall()
         return [dict(row) for row in rows]
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Request
 from starlette.concurrency import run_in_threadpool
@@ -99,7 +101,7 @@ def change_ai_models(payload_model: models.AiModelsRequest, request: Request, op
         kind="wiring",
         service_id=local_models.SERVICE_ID,
         action="apply",
-        actor=operator["username"],
+        actor=str(operator["username"]),
         actor_subject=subject,
         namespace=NAMESPACE,
         request=chosen,
@@ -111,7 +113,7 @@ def change_ai_models(payload_model: models.AiModelsRequest, request: Request, op
             kind="wiring",
             service_id=local_models.SERVICE_ID,
             action="apply",
-            actor=operator["username"],
+            actor=str(operator["username"]),
             actor_subject=subject,
             namespace=NAMESPACE,
             request=chosen,
@@ -198,23 +200,25 @@ async def change_voice_settings(payload: models.VoiceSettingsRequest, operator: 
     store = JobStore.runtime()
     if store:
         store.record_audit(
-            actor=operator["username"],
+            actor=str(operator["username"]),
             event="ai.voice_settings_changed",
             detail="Changed the voice assistant's settings.",
         )
     return await run_in_threadpool(_voice_page)
 
 
-def _report_audit(operator: dict, event: str, report_id: str, what: str) -> None:
+def _report_audit(operator: Mapping[str, Any], event: str, report_id: str, what: str) -> None:
     store = JobStore.runtime()
     if store:
-        store.record_audit(actor=operator["username"], event=event, detail=f"{what} voice call report {report_id}.")
+        store.record_audit(
+            actor=str(operator["username"]), event=event, detail=f"{what} voice call report {report_id}."
+        )
 
 
 @router.get("/voice/reports", response_model=models.VoiceReports)
 async def voice_reports_list(_operator: Operator) -> models.VoiceReports:
     """The kept call reports, newest first; reports past the household's limit are deleted first."""
-    return models.VoiceReports(reports=await run_in_threadpool(voice_reports.listing))
+    return models.VoiceReports.model_validate({"reports": await run_in_threadpool(voice_reports.listing)})
 
 
 @router.get("/voice/reports/{report_id}", response_model=models.VoiceReport)
@@ -247,7 +251,7 @@ async def delete_voice_report(report_id: str, operator: OperatorMutation) -> mod
     except voice_reports.ReportError as exc:
         raise ApiError(404, str(exc), code="report_missing") from None
     _report_audit(operator, "ai.voice_report_deleted", report_id, "Deleted")
-    return models.VoiceReports(reports=await run_in_threadpool(voice_reports.listing))
+    return models.VoiceReports.model_validate({"reports": await run_in_threadpool(voice_reports.listing)})
 
 
 @router.post("/voice/sample", response_model=models.VoiceSample, response_model_exclude_none=True)
@@ -296,7 +300,7 @@ def change_speech_models(payload: models.VoiceSpeechRequest, request: Request, o
         kind="lifecycle",
         service_id=service.id,
         action="retry_setup",
-        actor=operator["username"],
+        actor=str(operator["username"]),
         actor_subject=subject,
         namespace="ai.voice_speech",
         request=chosen,
@@ -313,7 +317,7 @@ def change_speech_models(payload: models.VoiceSpeechRequest, request: Request, o
             kind="lifecycle",
             service_id=service.id,
             action="retry_setup",
-            actor=operator["username"],
+            actor=str(operator["username"]),
             actor_subject=subject,
             namespace="ai.voice_speech",
             request=chosen,
@@ -341,5 +345,5 @@ async def remove_speech_model(
         raise ApiError(422, str(exc)) from exc
     store = JobStore.runtime()
     if store:
-        store.record_audit(actor=operator["username"], event="ai.speech_model_removed", detail=detail)
+        store.record_audit(actor=str(operator["username"]), event="ai.speech_model_removed", detail=detail)
     return models.OkResponse.model_validate({"ok": True, "message": detail})

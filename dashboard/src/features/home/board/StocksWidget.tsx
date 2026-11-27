@@ -13,6 +13,23 @@ function symbolsOf(widget: WidgetProps['widget']) {
   return ((widget.settings as { symbols?: string[] }).symbols || []).filter((item) => typeof item === 'string');
 }
 
+/** How far back the change and the line look: Yahoo's range, and what it is compared with. */
+const RANGES = [
+  ['1d', 'Yesterday’s close'],
+  ['5d', '5 days ago'],
+  ['1mo', '1 month ago'],
+  ['6mo', '6 months ago'],
+  ['ytd', 'January 1'],
+  ['1y', '1 year ago'],
+  ['5y', '5 years ago'],
+] as const;
+type Range = (typeof RANGES)[number][0];
+
+function rangeOf(widget: WidgetProps['widget']): Range {
+  const value = (widget.settings as { range?: string }).range;
+  return RANGES.find(([id]) => id === value)?.[0] ?? '1d';
+}
+
 function money(value: number | null | undefined, currency: string) {
   if (value == null) return '—';
   try {
@@ -44,7 +61,19 @@ function Sparkline({ points, up }: { points: number[]; up: boolean }) {
   );
 }
 
-function Row({ quote, wide, showPrice }: { quote: StockQuote; wide: boolean; showPrice: boolean }) {
+function Row({
+  quote,
+  wide,
+  showPrice,
+  showLine,
+  since,
+}: {
+  quote: StockQuote;
+  wide: boolean;
+  showPrice: boolean;
+  showLine: boolean;
+  since: string;
+}) {
   if (!quote.found)
     return (
       <li className="stock">
@@ -59,9 +88,9 @@ function Row({ quote, wide, showPrice }: { quote: StockQuote; wide: boolean; sho
         {quote.symbol}
         {wide && <small>{quote.name}</small>}
       </span>
-      {wide && <Sparkline points={quote.points ?? []} up={up} />}
+      {showLine && <Sparkline points={quote.points ?? []} up={up} />}
       {showPrice && <span className="stock-price">{money(quote.price, quote.currency ?? '')}</span>}
-      <span className={`stock-change ${up ? 'tone-green' : 'tone-red'}`}>
+      <span className={`stock-change ${up ? 'tone-green' : 'tone-red'}`} title={`Compared with ${since.toLowerCase()}`}>
         {quote.change_percent == null ? '—' : `${up ? '+' : ''}${quote.change_percent.toFixed(2)}%`}
       </span>
     </li>
@@ -79,52 +108,72 @@ export function StocksSettings({ widget, onChange }: SettingsProps) {
     onChange({ ...widget.settings, symbols: [...symbols, term] });
     setValue('');
   };
+  const range = rangeOf(widget);
   return (
-    <div className="widget-setting">
-      <span className="widget-setting-label">Tickers</span>
-      {symbols.length > 0 && (
-        <ul className="chip-list">
-          {symbols.map((symbol) => (
-            <li key={symbol}>
-              {symbol}
-              <button
-                type="button"
-                aria-label={`Remove ${symbol}`}
-                onClick={() => onChange({ ...widget.settings, symbols: symbols.filter((item) => item !== symbol) })}
-              >
-                <X />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <form className="inline-form" onSubmit={submit}>
-        <input
+    <>
+      <div className="widget-setting">
+        <span className="widget-setting-label">Compare with</span>
+        <select
           className="widget-input"
-          aria-label="Ticker symbol"
-          placeholder="AAPL, VFV.TO, BTC-USD"
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-        />
-        <Button type="submit" variant="secondary" size="sm" icon={Plus} disabled={!valid}>
-          Add
-        </Button>
-      </form>
-      <p className="muted widget-setting-hint">
-        Yahoo Finance symbols: add the exchange for stocks outside the US (.TO for Toronto, .L for London). Prices
-        update every minute while Home is open and may be delayed.
-      </p>
-    </div>
+          aria-label="Compare with"
+          value={range}
+          onChange={(event) => onChange({ ...widget.settings, range: event.target.value })}
+        >
+          {RANGES.map(([id, label]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <p className="muted widget-setting-hint">The change and the line cover this stretch.</p>
+      </div>
+      <div className="widget-setting">
+        <span className="widget-setting-label">Tickers</span>
+        {symbols.length > 0 && (
+          <ul className="chip-list">
+            {symbols.map((symbol) => (
+              <li key={symbol}>
+                {symbol}
+                <button
+                  type="button"
+                  aria-label={`Remove ${symbol}`}
+                  onClick={() => onChange({ ...widget.settings, symbols: symbols.filter((item) => item !== symbol) })}
+                >
+                  <X />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form className="inline-form" onSubmit={submit}>
+          <input
+            className="widget-input"
+            aria-label="Ticker symbol"
+            placeholder="AAPL, VFV.TO, BTC-USD"
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+          />
+          <Button type="submit" variant="secondary" size="sm" icon={Plus} disabled={!valid}>
+            Add
+          </Button>
+        </form>
+        <p className="muted widget-setting-hint">
+          Yahoo Finance symbols: add the exchange for stocks outside the US (.TO for Toronto, .L for London). Prices
+          update every minute while Home is open and may be delayed.
+        </p>
+      </div>
+    </>
   );
 }
 
-/** A watchlist from Yahoo Finance: price and today's change, with today's line when there is room. */
+/** A watchlist from Yahoo Finance: price, the change over the chosen range, and its line. */
 export function StocksWidget({ widget, onConfigure }: WidgetProps) {
   const { width } = useBox();
   const symbols = symbolsOf(widget);
+  const range = rangeOf(widget);
   const { data, error } = useApi<StocksResponse>(
-    symbols.length ? `/api/v1/home/stocks?symbols=${encodeURIComponent(symbols.join(','))}` : null,
-    { interval: 60_000 },
+    symbols.length ? `/api/v1/home/stocks?symbols=${encodeURIComponent(symbols.join(','))}&range=${range}` : null,
+    { interval: range === '1d' ? 60_000 : 5 * 60_000 },
   );
   if (!symbols.length)
     return (
@@ -136,18 +185,20 @@ export function StocksWidget({ widget, onConfigure }: WidgetProps) {
       </div>
     );
   if (!data) return error ? <p className="widget-error">{error}</p> : <p className="muted">Loading…</p>;
-  // Narrow: ticker and today's change. Then the price; wide, the name and today's line too.
+  // Always the ticker, its line and the change (the line shrinks first). Then the price; wide, the name.
   const measured = width > 0;
   const wide = !measured || width >= 480;
-  const showPrice = !measured || width >= 230;
+  const showPrice = !measured || width >= 290;
+  const showLine = !measured || width >= 140;
+  const since = RANGES.find(([id]) => id === range)?.[1] ?? '';
   return (
     <FitList
-      className={`stocks${wide ? ' is-wide' : showPrice ? '' : ' is-narrow'}`}
-      label="Watchlist"
+      className={`stocks${wide ? ' is-wide' : showPrice ? '' : ' is-narrow'}${showLine ? '' : ' no-line'}`}
+      label={`Watchlist, compared with ${since.toLowerCase()}`}
       more={(hidden) => `+${hidden} more`}
     >
       {(data.quotes ?? []).map((quote) => (
-        <Row key={quote.symbol} quote={quote} wide={wide} showPrice={showPrice} />
+        <Row key={quote.symbol} quote={quote} wide={wide} showPrice={showPrice} showLine={showLine} since={since} />
       ))}
     </FitList>
   );

@@ -16,7 +16,7 @@ widgets:
   refresh_seconds: 900
   largest: [12, 4]
   start: [4, 2]
-version: "v35.0.2"
+version: "v35.0.3"
 upstream: nextcloud/server
 service:
   local_port: 8085

@@ -117,10 +117,6 @@
   color: var(--accent-text);
 }
 
-.attention-progress > svg:first-child {
-  color: var(--blue);
-}
-
 .get-started-count {
   display: inline-flex;
   align-items: center;
@@ -1154,13 +1150,6 @@
 }
 
 /* ---------- Select mode: pick apps to start, stop or restart together ---------- */
-.section-title-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 16px;
-  font-size: 13px;
-}
-
 .launcher-group .launcher-pick {
   margin-left: auto;
   color: var(--text-3);

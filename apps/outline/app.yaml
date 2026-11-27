@@ -16,7 +16,15 @@ widgets:
   refresh_seconds: 600
   largest: [12, 10]
   start: [4, 4]
-version: "v1.12.0"
+- id: notes
+  title: Notes
+  description: One of your Outline documents, to read and write right on Home. Saved to Outline as you type.
+  personal: true
+  view: notes
+  refresh_seconds: 300
+  largest: [12, 14]
+  start: [4, 4]
+version: "v1.13.0"
 upstream: outline/outline
 service:
   local_port: 3005

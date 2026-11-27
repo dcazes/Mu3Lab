@@ -175,6 +175,19 @@ def approved(service: Service, root: Path, variant: str = "cpu") -> Release:
     )
 
 
+def target(service: Service, root: Path, variant: str = "cpu", paths: RuntimePaths | None = None) -> Release:
+    """The release this server updates to: a newer one from the app's makers that passed Mu3Lab's
+    checks here (``ctl.lifecycle.upstream``), else the one Mu3Lab approves."""
+    from ctl.lifecycle import upstream
+
+    return upstream.candidate(service, root, variant, paths or RuntimePaths()) or approved(service, root, variant)
+
+
+def source(service: Service, root: Path, release: Release) -> str:
+    """Where ``release`` comes from: ``upstream`` (screened here) or ``mu3lab`` (approved)."""
+    return "mu3lab" if release.version == approved(service, root, release.variant).version else "upstream"
+
+
 def _project(service_id: str, paths: RuntimePaths | None) -> Path:
     return (paths or RuntimePaths()).projects / service_id
 
@@ -251,32 +264,35 @@ def changed_files(service: Service, root: Path, paths: RuntimePaths | None = Non
 def status(service: Service, root: Path, paths: RuntimePaths | None = None) -> dict[str, Any]:
     """What the dashboard shows: installed, approved, and whether to offer the move."""
     current = installed(service, root, paths)
-    target = approved(service, root, current.variant if current else "cpu")
+    goal = target(service, root, current.variant if current else "cpu", paths)
     if not current:
         return {
             "installed_version": "",
-            "approved_version": target.version,
+            "approved_version": goal.version,
+            "source": source(service, root, goal),
             "update_available": False,
             "supporting_only": False,
             "files_only": False,
             "added_services": [],
             "removed_services": [],
         }
-    changed = any(_identity(current.images.get(name, "")) != _identity(image) for name, image in target.images.items())
+    changed = any(_identity(current.images.get(name, "")) != _identity(image) for name, image in goal.images.items())
     # The union of both service sets: a service the new release drops is a change too.
-    removed = sorted(set(current.images) - set(target.images))
-    added = sorted(set(target.images) - set(current.images))
+    removed = sorted(set(current.images) - set(goal.images))
+    added = sorted(set(goal.images) - set(current.images))
     images = changed or bool(removed)
     # Same images, but Mu3Lab changed the app's own files since they were installed.
     files = not images and bool(changed_files(service, root, paths))
     # Never offer a step back: an app already past the approved release stays put.
-    available = (images or files) and not is_newer(current.version, target.version)
+    available = (images or files) and not is_newer(current.version, goal.version)
     return {
         "installed_version": current.version,
-        "approved_version": target.version,
+        # The release an update moves to: Mu3Lab's, or a newer one from the app's makers ("source").
+        "approved_version": goal.version,
+        "source": source(service, root, goal),
         "update_available": available,
         # Same release, newer database or helper images: worth saying so.
-        "supporting_only": available and images and current.version == target.version,
+        "supporting_only": available and images and current.version == goal.version,
         "files_only": available and files,
         "added_services": added if available else [],
         "removed_services": removed if available else [],

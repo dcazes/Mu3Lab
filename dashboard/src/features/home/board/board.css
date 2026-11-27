@@ -30,12 +30,8 @@
   }
 }
 
-/* While editing, the board keeps its width and columns: the panel sits beside it (the page slides
-   left into its margin to make room, usePanelRoom) or, in a window too narrow, floats over its edge. */
-.home {
-  transition: transform 0.18s ease-out;
-}
-
+/* While editing, the board keeps its width and columns: the panel floats over its right edge
+   (usePanelRoom), or docks at the bottom on a narrow screen. */
 @media (min-width: 1001px) {
   .board-panel {
     position: fixed;
@@ -67,12 +63,75 @@
   margin: -8px;
 }
 
-.board-grid .grid-stack-item-content {
+/* gridstack gives every cell a scroll bar for content taller than the cell (and its rule outranks a
+   plain one). A widget lays itself out for its room instead, so a cell never scrolls. */
+.board-grid.grid-stack .grid-stack-item > .grid-stack-item-content {
   overflow: visible;
+}
+
+/* While arranging, the browser must not keep the page "anchored" to a widget the grid is moving:
+   it would scroll after it, the grid would move it again, and the page would run away downwards. */
+html:has(.board.is-editing) {
+  overflow-anchor: none;
 }
 
 .board-grid .grid-stack-item-content > .widget {
   height: 100%;
+}
+
+/* A group: a quieter card behind its own grid of widgets. The card fills the cell; the group's grid
+   (gridstack's, nested in the same cell) starts under the title bar. */
+.board-grid .grid-stack-item-content > .widget-group {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  background: var(--surface-2);
+  box-shadow: none;
+}
+
+.board-grid .grid-stack-item-content > .board-subgrid {
+  margin-top: 40px;
+}
+
+.widget-group .widget-head h3 {
+  color: var(--text);
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.widget-group-empty {
+  display: grid;
+  place-items: center;
+  height: 60px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* A group on a phone: its title, then its widgets. */
+.board-stack-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+}
+
+.board-stack-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.board-stack-group-head h3 {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 /* A phone-width board: one column, top-left first. */
@@ -1354,9 +1413,27 @@ body > li[data-kind] .board-kind-detail {
   justify-content: center;
 }
 
+/* The dots sit over the bottom of the day rather than below its date, so a week with events is
+   exactly as tall as one without. */
+.cal-compact .fc .fc-daygrid-day-events {
+  position: absolute;
+  right: 0;
+  bottom: 2px;
+  left: 0;
+  margin: 0;
+}
+
 .cal-compact .fc .fc-daygrid-day-bottom {
   display: flex;
   justify-content: center;
+  margin: 0;
+  padding: 0;
+  line-height: 0;
+}
+
+.cal-compact .fc .fc-daygrid-more-link {
+  padding: 2px 4px;
+  line-height: 0;
 }
 
 .cal-compact .fc .fc-daygrid-more-link:hover {
@@ -1498,12 +1575,28 @@ body > li[data-kind] .board-kind-detail {
   font-size: 13px;
 }
 
+/* Narrow: ticker, line, change (no price); the line takes what the other two leave. */
+.stocks .stock {
+  grid-template-columns: minmax(44px, auto) minmax(0, 1fr) auto auto;
+}
+
 .stocks.is-narrow .stock {
+  grid-template-columns: minmax(44px, auto) minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.stocks.no-line .stock {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .stocks.is-wide .stock {
-  grid-template-columns: minmax(0, 1fr) 72px auto 64px;
+  grid-template-columns: minmax(0, 1fr) 96px auto 64px;
+}
+
+.stock .sparkline {
+  width: 100%;
+  min-width: 0;
+  height: 20px;
 }
 
 .stock-symbol {
@@ -1881,6 +1974,53 @@ body > li[data-kind] .board-kind-detail {
 
 .thermostat.is-short .thermostat-temp {
   font-size: 26px;
+}
+
+/* Short, with the modes on a line of their own under the reading and the set point. */
+.thermostat.is-short.modes-below {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    'now setpoints'
+    'modes modes';
+  gap: 4px 12px;
+}
+
+.thermostat.is-short.modes-below .thermostat-modes {
+  width: 100%;
+}
+
+/* The smallest: tighter set points, and no heating line, so both lines fit. */
+.thermostat.is-tight .thermostat-state {
+  display: none;
+}
+
+.thermostat.is-tight .setpoints {
+  gap: 2px;
+}
+
+.thermostat.is-tight .setpoint button {
+  width: 20px;
+  height: 20px;
+}
+
+.thermostat.is-tight .setpoint strong {
+  min-width: 26px;
+  font-size: 14px;
+}
+
+.thermostat.is-tight .thermostat-modes button {
+  height: 22px;
+}
+
+.thermostat-modes.is-icons button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.thermostat-modes.is-icons svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* Narrow: the set point's label goes, the buttons and value stay. */
@@ -2550,4 +2690,874 @@ a.appw-item:hover {
 .board-key-actions {
   display: flex;
   gap: 8px;
+}
+
+/* ---------- Grid lines while arranging ---------- */
+/* Each cell a faint tile, inset by half the gap like the widgets, so it shows where a widget lands.
+   Columns come from the background, rows from the mask: together, one tile per cell. Works for any
+   number of columns, and inside groups too (their grids set their own sizes). */
+.board.is-editing .grid-stack::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+    to right,
+    transparent var(--gs-item-margin-left, 8px),
+    var(--board-cell) var(--gs-item-margin-left, 8px),
+    var(--board-cell) calc(100% - var(--gs-item-margin-right, 8px)),
+    transparent calc(100% - var(--gs-item-margin-right, 8px))
+  );
+  background-size: var(--gs-column-width) var(--gs-cell-height);
+  mask-image: linear-gradient(
+    to bottom,
+    transparent var(--gs-item-margin-top, 8px),
+    #000 var(--gs-item-margin-top, 8px),
+    #000 calc(100% - var(--gs-item-margin-bottom, 8px)),
+    transparent calc(100% - var(--gs-item-margin-bottom, 8px))
+  );
+  mask-size: var(--gs-column-width) var(--gs-cell-height);
+}
+
+:root {
+  --board-cell: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+/* ---------- Widget settings, dropped down from the gear ---------- */
+.board-popover {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg, var(--shadow-md));
+  animation: popover-in 0.12s ease-out;
+}
+
+.board-popover.is-above {
+  animation-name: popover-in-above;
+}
+
+@keyframes popover-in {
+  from {
+    transform: translateY(-4px);
+    opacity: 0;
+  }
+}
+
+@keyframes popover-in-above {
+  from {
+    transform: translateY(4px);
+    opacity: 0;
+  }
+}
+
+.board-popover-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.board-popover-head h3 {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.board-popover-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 14px 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.board-popover-body .board-panel-remove {
+  align-self: flex-start;
+}
+
+/* A phone: the settings slide up from the bottom, over the tab bar. */
+@media (max-width: 700px) {
+  .board-popover {
+    top: auto !important;
+    left: 8px !important;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    width: auto !important;
+    max-height: 70vh;
+    animation-name: dock-up;
+  }
+}
+
+@media (max-width: 760px) {
+  .board-popover {
+    bottom: calc(66px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---------- Untitled widgets ---------- */
+/* No title bar outside edit mode: the contents take the whole card. */
+.widget.is-untitled {
+  padding-top: 14px;
+}
+
+/* ---------- Folding groups ---------- */
+.widget-group-fold svg {
+  transition: transform 0.15s ease;
+}
+
+.widget-group-fold[aria-expanded='false'] svg {
+  transform: rotate(-90deg);
+}
+
+/* Folded: only its title bar; the widgets in it are hidden with it, and come back unfolded. */
+.board-grid .grid-stack-item-content:has(> .widget-group.is-collapsed) > .board-subgrid {
+  display: none;
+}
+
+.widget-group.is-collapsed .widget-head {
+  margin-bottom: 0;
+}
+
+.widget-group-count {
+  flex: none;
+  font-size: 12px;
+}
+
+/* Renamed in its title bar: a field as wide as the name, so the rest of the bar still moves the group. */
+.widget-group-title {
+  min-width: 4ch;
+  max-width: 100%;
+  height: 26px;
+  margin-right: auto;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  field-sizing: content;
+  cursor: text;
+}
+
+.widget-group-title:hover {
+  border-color: var(--border-strong);
+}
+
+.widget-group-title:focus {
+  border-color: var(--accent);
+  background: var(--surface);
+  outline: 0;
+}
+
+.board-stack-group-head .widget-group-title {
+  flex: 1;
+}
+
+/* ---------- Boards as tabs ---------- */
+.board-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.board-tabs-list {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.board-tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.board-tab:hover {
+  color: var(--text);
+}
+
+.board-tab.is-current {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+
+.board-tab.is-editing {
+  padding: 0 2px 0 4px;
+}
+
+.board-tab-name {
+  min-width: 4ch;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  field-sizing: content;
+}
+
+.board-tab-name:hover {
+  border-color: var(--border-strong);
+}
+
+.board-tab-name:focus {
+  border-color: var(--accent);
+  outline: 0;
+}
+
+.board-tab-add {
+  color: var(--accent-text);
+}
+
+.board-tab-add svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* While arranging, an empty or short board still shows a few rows of cells to drop widgets into. */
+.board.is-editing .board-grid.grid-stack {
+  min-height: calc(4 * 76px);
+}
+
+/* ---------- Clock ---------- */
+.clock {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+}
+
+.clock.is-beside {
+  flex-direction: row;
+  align-items: center;
+  gap: 24px;
+}
+
+.clock-time {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.clock.is-big .clock-time {
+  font-size: clamp(30px, 18cqh, 64px);
+}
+
+.clock-place {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clock-others {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  min-width: 0;
+}
+
+.clock-others li {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 160px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.clock-others strong {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.clock-other-name,
+.clock-others small {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clock.is-short {
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.clock.is-short .clock-others li {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+}
+
+.clock.is-short .clock-others strong {
+  font-size: 13px;
+}
+
+.clock-zone-list,
+.bookmark-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+}
+
+.clock-zone-list li,
+.bookmark-edit li {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* ---------- Links ---------- */
+.bookmark-badge {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: hsl(var(--badge-hue, 220) 55% 92%);
+  color: hsl(var(--badge-hue, 220) 45% 32%);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .bookmark-badge {
+    background: hsl(var(--badge-hue, 220) 35% 24%);
+    color: hsl(var(--badge-hue, 220) 60% 82%);
+  }
+}
+
+:root[data-theme='dark'] .bookmark-badge {
+  background: hsl(var(--badge-hue, 220) 35% 24%);
+  color: hsl(var(--badge-hue, 220) 60% 82%);
+}
+
+.bookmark-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bookmark-tiles a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.bookmark-tiles a:hover,
+.bookmark-list a:hover {
+  background: var(--surface-2);
+}
+
+.bookmark-tiles .bookmark-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-list a {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.bookmark-list .bookmark-badge {
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+}
+
+.bookmark-list .bookmark-name,
+.bookmark-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.bookmark-add .btn {
+  align-self: flex-start;
+}
+
+/* ---------- Convert ---------- */
+.convert {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+}
+
+.convert-row {
+  display: flex;
+  gap: 6px;
+}
+
+.convert-row > select {
+  flex: 1;
+  min-width: 0;
+}
+
+.convert-kind {
+  flex: 1;
+}
+
+.convert-amount,
+.convert-result {
+  flex: 0 1 45%;
+  min-width: 0;
+}
+
+.convert-swap {
+  flex: none;
+  width: 32px;
+  height: 32px;
+}
+
+.convert-result {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 4px;
+  overflow: hidden;
+  font-size: 19px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.convert-note {
+  font-size: 11.5px;
+}
+
+/* ---------- News ---------- */
+.rss-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.rss-list a {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 2px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.rss-list a:hover .rss-title {
+  text-decoration: underline;
+}
+
+.rss-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rss-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12.5px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rss-list small {
+  font-size: 11.5px;
+}
+
+.chip-list.is-wide li {
+  max-width: 100%;
+}
+
+/* ---------- Server ---------- */
+.resource-meters li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+
+.resource-detail {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.resource-bar {
+  grid-column: 1 / -1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.resource-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+  transition: width 0.4s ease;
+}
+
+.resource-bar.tone-warn i {
+  background: var(--amber);
+}
+
+.resource-bar.tone-bad i {
+  background: var(--red);
+}
+
+/* ---------- Top movers ---------- */
+.movers {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  overflow: hidden;
+  mask-image: linear-gradient(to right, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+
+.movers-track {
+  display: flex;
+  gap: 28px;
+  width: max-content;
+  list-style: none;
+  animation: movers-run calc(var(--movers-count, 10) * 3.2s) linear infinite;
+}
+
+.movers:hover .movers-track,
+.movers:focus-within .movers-track {
+  animation-play-state: paused;
+}
+
+.movers.is-still {
+  mask-image: none;
+}
+
+.movers.is-still .movers-track {
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  width: auto;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .movers-track {
+    flex-wrap: wrap;
+    gap: 6px 20px;
+    width: auto;
+    animation: none;
+  }
+
+  .mover-copy {
+    display: none;
+  }
+}
+
+@keyframes movers-run {
+  to {
+    transform: translateX(calc(-50% - 14px));
+  }
+}
+
+.mover {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13.5px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.mover-copy {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13.5px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Notes ---------- */
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+}
+
+.notes-text {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.5;
+  resize: none;
+  scrollbar-width: thin;
+}
+
+.notes-text:focus {
+  border-color: var(--accent);
+  outline: 0;
+  background: var(--surface);
+}
+
+.notes.is-saved .notes-text {
+  opacity: 0.75;
+}
+
+.notes-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.notes-foot a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes-foot svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.notes-state.is-failed {
+  color: var(--red-text);
+}
+
+/* ---------- Slideshow ---------- */
+.slideshow {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.slideshow-photo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  animation: slide-in 0.6s ease;
+}
+
+.slideshow.is-contain .slideshow-photo {
+  object-fit: contain;
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slideshow-photo {
+    animation: none;
+  }
+}
+
+.slideshow-caption {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 18px 10px 8px;
+  overflow: hidden;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.55));
+  color: #fff;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slideshow-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.slideshow:hover .slideshow-controls,
+.slideshow:focus-within .slideshow-controls {
+  opacity: 1;
+}
+
+.slideshow-controls button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.slideshow-controls button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.slideshow-controls svg {
+  width: 15px;
+  height: 15px;
+}
+
+.slideshow-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  text-align: center;
+}
+
+/* Links in a short widget: badge and name side by side, wrapping. */
+.bookmark-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bookmark-chips a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  padding: 3px 10px 3px 3px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12.5px;
+  text-decoration: none;
+}
+
+.bookmark-chips a:hover {
+  background: var(--border);
+}
+
+.bookmark-chips .bookmark-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.bookmark-chips .bookmark-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- One-row widgets ---------- */
+/* One row tall: the title bar sits beside the contents instead of above them. */
+.widget.is-one-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.widget.is-one-row > .widget-head {
+  flex: none;
+  max-width: 45%;
+  margin-bottom: 0;
+}
+
+.widget.is-one-row > .widget-head h3 {
+  flex: 0 1 auto;
+}
+
+.widget.is-one-row > .widget-body {
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
 }

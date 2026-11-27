@@ -19,10 +19,10 @@ import {
 import { useApi } from '../../lib/useApi';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { useApplyUpdate } from './AdvancedTab';
-import { AppStacks } from './AppStacks';
+import { AppStacks, SelectToggle, useAppSelection } from './AppStacks';
 import { InstallPlanDialog, sizeLabel } from './InstallPlanDialog';
 import { InstallProgress } from './InstallProgress';
-import { activeJob, JobProgress } from './JobProgress';
+import { AppsJobQueue } from './JobQueue';
 import { UpdateAll } from './UpdateAll';
 import { useInstallBatch } from './useInstallBatch';
 
@@ -242,12 +242,9 @@ export function AppsPage({ discover }: { discover: boolean }) {
           ])
       : [],
   );
-  // Installs, retries and updates started from an app's own page; the batch card covers its own jobs.
+  // Every app being started, stopped, installed or updated, as one notice; the batch card covers its own jobs.
   const batchJobs = new Set((installBatch.batch?.items || []).map((item) => item.job_id).filter(Boolean));
-  const singleJobs = services.filter((service) => {
-    const job = activeJob(service);
-    return job && !batchJobs.has(job.id);
-  });
+  const busy = services.filter((service) => !batchJobs.has(service.last_job?.id || ''));
   // Drop picks that have since been installed or joined the queue.
   const selected = stored.filter((id) =>
     available.some((service) => service.id === id && canInstall(service) && !queued.has(id)),
@@ -261,6 +258,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
     matches(service, term, catalog[service.id]?.summary),
   );
   const sections = appSections(shown);
+  const picking = useAppSelection(shown);
   const names = (ids: string[]) => ids.map((id) => services.find((service) => service.id === id)?.name || id);
   const toggle = (id: string) =>
     setSelected(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
@@ -283,8 +281,13 @@ export function AppsPage({ discover }: { discover: boolean }) {
             { label: 'Discover', to: '/apps/discover', count: available.filter(canInstall).length },
           ]}
         />
-        {!discover && <ViewSwitch view={view} onChange={setView} />}
-        {!discover && <UpdateAll />}
+        {!discover && (
+          <div className="toolbar-actions">
+            <SelectToggle selection={picking} services={shown} />
+            <ViewSwitch view={view} onChange={setView} />
+            <UpdateAll />
+          </div>
+        )}
         <label className="search-input">
           <Search />
           <input
@@ -305,9 +308,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
           controls={installBatch.controls}
         />
       )}
-      {singleJobs.map((service) => (
-        <JobProgress key={service.id} service={service} showName />
-      ))}
+      <AppsJobQueue services={busy} />
       {!shown.length ? (
         <EmptyState
           icon={PackageSearch}
@@ -353,6 +354,7 @@ export function AppsPage({ discover }: { discover: boolean }) {
       ) : (
         <AppStacks
           services={shown}
+          selection={picking}
           listRow={
             view === 'list'
               ? (service) => (

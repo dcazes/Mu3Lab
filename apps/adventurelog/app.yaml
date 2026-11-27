@@ -16,7 +16,7 @@ widgets:
   refresh_seconds: 1800
   largest: [12, 10]
   start: [4, 3]
-version: "v0.13.1"
+version: "v0.14.0"
 upstream: seanmorley15/AdventureLog
 service:
   local_port: 8015

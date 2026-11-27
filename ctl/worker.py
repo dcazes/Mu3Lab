@@ -8,6 +8,13 @@ Only one worker executes at a time (``resource_locks.WorkerLock``): a second
 one, or a restarted one while a paused one still lives, waits. Each job holds
 its resource's lock while it runs, and no job is claimed while a command an
 earlier worker started is still running (``job_processes``).
+
+Jobs run one at a time, in the order they were asked for, with one exception:
+updates of catalog apps that have nothing to do with each other run side by
+side, up to ``SIDE_BY_SIDE`` at once (``_together``). What they share (the
+private ingress, sign-in, the backup repository, chat) is locked step by step.
+While updates wait or run, the upkeep that talks to apps waits too, and runs
+once after the last one, instead of after each app.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ from ctl import (
     access,
     backup_location,
     backup_service,
+    chat_ops,
     disk_cleanup,
     job_guard,
     local_models,
@@ -41,6 +49,7 @@ from ctl.job_processes import JobProcesses
 from ctl.jobs import JobStore
 from ctl.mcp_ops import execute_claimed as execute_mcp_claimed
 from ctl.provider_ops import execute_claimed as execute_provider_claimed
+from ctl.registry import Registry, Service
 from ctl.service_ops import execute_claimed as execute_service_claimed
 from ctl.status import reconciler, sign_in, signals
 from ctl.store import records
@@ -62,6 +71,21 @@ SAFETY_PASS_SECONDS = 3600
 log = logging.getLogger("mu3lab.worker")
 
 
+_upstream_checking = threading.Event()
+
+
+def _check_upstream() -> None:
+    try:
+        from ctl.lifecycle import upstream
+        from ctl.registry import load as load_registry
+
+        upstream.check_due(load_registry(), ROOT, log.info)
+    except Exception as exc:
+        log.warning(f"Mu3Lab's check for newer app releases deferred: {exc}")
+    finally:
+        _upstream_checking.clear()
+
+
 def _running_apps() -> frozenset[str]:
     state = ControlState.runtime()
     return state.running_apps() if state else frozenset()
@@ -73,6 +97,62 @@ def _backup_changed_at() -> str:
 
 def _backup_busy() -> bool:
     return bool(records.names(backup_service.HOLDS))
+
+
+# App updates that may run at once (see ``_together``).
+SIDE_BY_SIDE = 3
+# Apps whose update always runs alone: every chat app, and the backup service the others' backups use.
+_ALONE_CAPABILITIES = frozenset({"chat", "backup_service"})
+
+
+def _side_by_side(job: dict, registry: Registry) -> Service | None:
+    """The app, when this job is an update that may run beside other updates."""
+    if job.get("action") != "update" or job.get("kind") != "lifecycle":
+        return None
+    try:
+        service = registry.get(str(job.get("service_id") or ""))
+    except Exception:
+        return None
+    if service.stage != "optional" or set(service.manifest.capabilities) & _ALONE_CAPABILITIES:
+        return None
+    return service
+
+
+def _related(one: Service, other: Service) -> bool:
+    """Whether one app needs the other, or works with what the other offers."""
+    if one.id in other.dependencies or other.id in one.dependencies:
+        return True
+    offers = set(one.manifest.capabilities), set(other.manifest.capabilities)
+    wants = (
+        {item.capability for item in one.manifest.integrates_with},
+        {item.capability for item in other.manifest.integrates_with},
+    )
+    return bool(offers[0] & wants[1] or offers[1] & wants[0])
+
+
+def _together(job: dict, running: list[dict]) -> bool:
+    """Whether ``job`` may start while ``running`` jobs run: unrelated app updates, a few at once."""
+    if not running or len(running) >= SIDE_BY_SIDE:
+        return False
+    from ctl.registry import load as load_registry
+
+    try:
+        registry = load_registry()
+    except Exception:
+        return False
+    service = _side_by_side(job, registry)
+    if service is None:
+        return False
+    for other in running:
+        current = _side_by_side(other, registry)
+        if current is None or current.id == service.id or _related(service, current):
+            return False
+    return True
+
+
+def _updates_waiting(store: JobStore) -> bool:
+    """An app update is waiting or running: upkeep that talks to apps waits until the last one."""
+    return any(job.get("action") == "update" for job in store.active_jobs())
 
 
 LEASE_SECONDS = 45  # JobStore's default lease
@@ -248,6 +328,42 @@ def run() -> int:
     signal.signal(signal.SIGINT, stop)
     downloads_stopping = threading.Event()
     status_thread: threading.Thread | None = None
+    # App updates running beside each other, on their own threads (see ``_together``).
+    running: dict[str, tuple[threading.Thread, dict]] = {}
+
+    def finished(store: JobStore, job: dict) -> None:
+        """What follows every job, once it ended."""
+        nonlocal last_event, build_cache_due, vault_sync_soon
+        # Installs, removals, updates, starts, stops and settings changes are the events
+        # app upkeep follows (see EVENT_FOLLOW_UP_SECONDS).
+        last_event = time.monotonic()
+        # Once nothing else runs, clear what its builds left (see ctl/disk_cleanup.py).
+        build_cache_due = build_cache_due or disk_cleanup.builds(job)
+        if resource_usage.touches_disk(job):
+            resource_usage.disk_stale.set()
+        # A finished install may have created logins; save them within a minute.
+        vault_sync_soon = vault_sync_soon or time.monotonic() + 30
+        try:
+            from ctl.install_batches import InstallBatchStore
+
+            batches = InstallBatchStore.runtime()
+            if batches:
+                batches.advance_for_job(str(job["id"]), store)
+            workflow_secrets.cleanup()
+        except Exception as exc:  # batch recovery will reconcile on next API/worker pass
+            log.warning(f"Mu3Lab post-job reconciliation deferred safely: {exc}")
+
+    def beside(store: JobStore, job: dict) -> None:
+        def body() -> None:
+            try:
+                run_job(store, job, worker_id)
+            finally:
+                signals.wake()  # the main loop reaps it and may start the next one
+
+        thread = threading.Thread(target=body, name=f"mu3lab-job-{str(job['id'])[:8]}", daemon=True)
+        running[str(job["id"])] = (thread, job)
+        thread.start()
+
     lock = resource_locks.WorkerLock()
     waiting_for_lock_reported = False
     processes: JobProcesses | None = None
@@ -316,9 +432,37 @@ def run() -> int:
         if not settled:
             settled = True
             backups.start_verification(downloads_stopping, log.info)
+        for job_id, (thread, done) in list(running.items()):
+            if not thread.is_alive():
+                thread.join()
+                del running[job_id]
+                finished(store, done)
+        if running:
+            # Only another app update that has nothing to do with these may start now.
+            others = [job for _thread, job in running.values()]
+
+            def accept(row: dict, others: list[dict] = others) -> bool:
+                return _together(row, others)
+
+            try:
+                job = store.claim(worker_id, accept=accept)
+            except Exception as exc:  # a locked store: try again shortly
+                log.warning(f"Mu3Lab could not look for the next job yet: {exc}")
+                job = None
+            if job is not None:
+                beside(store, job)
+                continue
+            wakeup.wait(POLL_SECONDS)
+            wakeup.clear()
+            continue
         notice_events()
-        rules_due = due("rules", 60, 900)
-        app_upkeep_due = event_due("app-upkeep")
+        try:
+            # Updates still waiting: the upkeep that talks to apps runs once, after the last one.
+            upkeep = not _updates_waiting(store)
+        except Exception:
+            upkeep = True
+        rules_due = upkeep and due("rules", 60, 900)
+        app_upkeep_due = upkeep and event_due("app-upkeep")
         if rules_due or app_upkeep_due:
             try:
                 run_periodic(store, ROOT, log.info, rules=rules_due, app_upkeep=app_upkeep_due)
@@ -329,7 +473,7 @@ def run() -> int:
         from ctl import vault_sync
 
         household_at = signals.household_changed_at()
-        if (
+        if upkeep and (
             (vault_sync_soon and time.monotonic() >= vault_sync_soon)
             or household_at > vault_household_seen
             or due("vault", 300 if vault_sync.someone_waiting() else 3600, 3600)
@@ -345,7 +489,7 @@ def run() -> int:
             backup_busy = _backup_busy()
         except Exception:
             backup_busy = True  # unsure: keep the backup upkeep each minute
-        if event_due("backup", busy=backup_busy):
+        if upkeep and event_due("backup", busy=backup_busy):
             try:
                 # Kopia's server runs the schedule; keep its folders, actions and policy in step.
                 backup_service.reconcile(store, ROOT, log.info)
@@ -356,6 +500,12 @@ def run() -> int:
                 rebuild.resume(store, ROOT, log.info)
             except Exception as exc:
                 log.warning(f"Mu3Lab could not start the restored apps yet: {exc}")
+        if due("upstream-releases", 3600, 3600) and not _upstream_checking.is_set():
+            # Newer releases from each installed app's makers, about once a day per app
+            # (ctl/lifecycle/upstream.py). Read-only: it only decides what the Update button
+            # offers. It reads GitHub and the registries, so it runs beside the job loop.
+            _upstream_checking.set()
+            threading.Thread(target=_check_upstream, name="upstream-releases", daemon=True).start()
         if due("history", 24 * 3600, 24 * 3600):
             try:
                 from ctl import history
@@ -365,14 +515,15 @@ def run() -> int:
                     log.info(f"Mu3Lab removed old history: {removed}")
             except Exception as exc:
                 log.warning(f"Mu3Lab history clean-up deferred: {exc}")
-        if event_due("mcp"):
+        if upkeep and event_due("mcp"):
             try:
                 from ctl.mcp_ops import reconcile_lifecycle
 
                 reconcile_lifecycle(ROOT, log.info)
             except Exception as exc:
                 log.warning(f"Mu3Lab MCP lifecycle reconciliation deferred: {exc}")
-        if due("chat", 300, 3600):
+        # App updates hold their chat syncs back (``chat_ops.deferred_sync``): one sync after the last.
+        if upkeep and (chat_ops.sync_pending() or due("chat", 300, 3600)):
             try:
                 sync_agents(log.info)
             except Exception as exc:
@@ -386,7 +537,7 @@ def run() -> int:
                 batches.reconcile(store)
         except Exception as exc:
             log.warning(f"Mu3Lab batch reconciliation deferred safely: {exc}")
-        if build_cache_due and not disk_cleanup.busy(store, batches):
+        if upkeep and build_cache_due and not disk_cleanup.busy(store, batches):
             build_cache_due = False
             try:
                 if disk_cleanup.clear_build_cache(log.info):
@@ -402,26 +553,22 @@ def run() -> int:
             wakeup.clear()
             continue
         try:
-            run_job(store, job, worker_id)
-            # Installs, removals, updates, starts, stops and settings changes are the events
-            # app upkeep follows (see EVENT_FOLLOW_UP_SECONDS).
-            last_event = time.monotonic()
-            # Once nothing else runs, clear what its builds left (see ctl/disk_cleanup.py).
-            build_cache_due = build_cache_due or disk_cleanup.builds(job)
-            if resource_usage.touches_disk(job):
-                resource_usage.disk_stale.set()
-            # A finished install may have created logins; save them within a minute.
-            vault_sync_soon = vault_sync_soon or time.monotonic() + 30
-        finally:
-            try:
-                from ctl.install_batches import InstallBatchStore
+            from ctl.registry import load as load_registry
 
-                batches = InstallBatchStore.runtime()
-                if batches:
-                    batches.advance_for_job(str(job["id"]), store)
-                workflow_secrets.cleanup()
-            except Exception as exc:  # batch recovery will reconcile on next API/worker pass
-                log.warning(f"Mu3Lab post-job reconciliation deferred safely: {exc}")
+            alongside = _side_by_side(job, load_registry()) is not None
+        except Exception:
+            alongside = False
+        if alongside:
+            # Updates after it that have nothing to do with it may start beside it.
+            beside(store, job)
+            continue
+        try:
+            run_job(store, job, worker_id)
+        finally:
+            finished(store, job)
+    # Updates already under way finish first: stopping one half-way is worse than waiting.
+    for thread, _job in running.values():
+        thread.join()
     downloads_stopping.set()
     signals.wake()
     if status_thread is not None:

@@ -16,7 +16,7 @@ widgets:
   refresh_seconds: 300
   largest: [12, 10]
   start: [4, 4]
-version: 0.10.0
+version: "0.10.1"
 upstream: daya0576/beaverhabits
 service:
   local_port: 8086

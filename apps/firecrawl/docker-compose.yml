@@ -2,7 +2,7 @@ name: mu3lab-firecrawl
 
 services:
   api:
-    image: ghcr.io/firecrawl/firecrawl:2.11.684-production@sha256:9197579f5d43770eae05c0f873bf7187ee9244b4dde124923e80c8ed4b07f1aa
+    image: ghcr.io/firecrawl/firecrawl:2.11.871-production@sha256:31a267b9b3cbabbe7f767437148044009bb8c131af796569e5ddfcf7045fda6b
     restart: unless-stopped
     command: node dist/src/harness.js --start-docker
     ports: ["127.0.0.1:3002:3002"]
@@ -52,7 +52,7 @@ services:
       options: {max-size: "10m", max-file: "3"}
 
   playwright-service:
-    image: ghcr.io/firecrawl/playwright-service@sha256:637fb8c8399634b02c2179da72566ce11644435e5d93e895bdbde4b1f9b0882a
+    image: ghcr.io/firecrawl/playwright-service@sha256:227ce3d8059173925a5a0697c63a1e947662cca934a609151651f578774edd5d
     restart: unless-stopped
     # The published image includes the compiled server and dependencies, but
     # its inherited pnpm command invokes Corepack and can try to download pnpm

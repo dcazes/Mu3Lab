@@ -38,6 +38,10 @@ for name in $wanted; do
   # files the apps add themselves (qBittorrent's downloads, filed episodes) would never appear.
   occ files_external:option "$id" filesystem_check_changes 1 >/dev/null \
     || { echo "MU3LAB_ERROR Nextcloud could not keep the $title folder up to date"; exit 3; }
+  # Let people share files and folders from it like any of their own (Nextcloud's default for
+  # external storage is no sharing at all).
+  occ files_external:option "$id" enable_sharing true >/dev/null \
+    || { echo "MU3LAB_ERROR Nextcloud could not allow sharing from the $title folder"; exit 3; }
   if printf '%s\n' "$admins_only" | grep -qx "$name"; then
     occ files_external:applicable --add-group=admin "$id" >/dev/null \
       || { echo "MU3LAB_ERROR Nextcloud could not keep the $title folder to administrators"; exit 3; }

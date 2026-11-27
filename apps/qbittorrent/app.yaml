@@ -22,8 +22,12 @@ widgets:
   refresh_seconds: 10
   largest: [12, 10]
   start: [4, 4]
-version: "v5.3.0"
+version: "v5.3.1"
 upstream: qbittorrent/qBittorrent
+# Its image tags add a build counter to the release number (newer releases, ctl/lifecycle/upstream.py).
+upstream_tags:
+  gateway: "{version}-*"
+  qbittorrent: "{version}-*"
 media:
 - name: downloads
   purpose: Finished torrents with no category. Unfinished pieces wait in its hidden .incomplete folder.

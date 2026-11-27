@@ -19,7 +19,7 @@ widgets:
     help: In Wallos, open your profile (your name at the top right), find API Key, and copy it here. It shows only your own subscriptions.
   largest: [12, 10]
   start: [4, 4]
-version: "v5.11.2"
+version: "v5.11.3"
 upstream: ellite/Wallos
 service:
   local_port: 8282

@@ -22,6 +22,9 @@ widgets:
   start: [4, 4]
 version: "v4.0.20.3014"
 upstream: Sonarr/Sonarr
+# Its image tags add a build counter to the release number (newer releases, ctl/lifecycle/upstream.py).
+upstream_tags:
+  sonarr: "{version}-ls*"
 # Sonarr offers its key to Prowlarr and Seerr, which connect to it when they are installed.
 capabilities: [tv_automation, media_folders]
 depends_on: [qbittorrent]

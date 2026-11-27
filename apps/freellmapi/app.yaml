@@ -17,7 +17,7 @@ widgets:
   refresh_seconds: 300
   largest: [12, 10]
   start: [4, 4]
-version: "v0.16.19"
+version: "v0.16.46"
 upstream: TashfeenAhmed/FreeLLMAPI
 service:
   local_port: 3001

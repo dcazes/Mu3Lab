@@ -21,7 +21,7 @@ widgets:
   refresh_seconds: 300
   largest: [12, 10]
   start: [4, 4]
-version: "v2.11.1"
+version: "v2.11.2"
 upstream: Cleanuparr/Cleanuparr
 depends_on: [qbittorrent]
 backup:

@@ -186,6 +186,10 @@ engine unchanged.
   slide back, with a "Tidy up" button) and **Gravity** (everything packs to the top). Free is the default.
 - **D3 Phone: one column in the computer board's order,** with a "Hide on phone" switch on each widget.
 - **D4 Organising: collapsible sections in one board** ("Media", "Home"…), each folding to its title bar.
+  **Changed 2026-11-26:** the owner chose **group cards** instead: a titled card, moved and resized like any
+  widget, holding several widgets on a small grid of its own (gridstack nested grids, kind `group`, its
+  widgets in `children`). Drag a widget onto it to add it, out to take it out; Ungroup leaves its widgets
+  on the board. Built on `feature/home-apps-layout`.
 - **D5 Household board: yes.** An administrator arranges it; new people start from it; "Reset to household board" for anyone.
 - **D6 Look: all three:** a background picture (with blur and dimming), see-through widgets and compact spacing.
 - **D7 Python: move Mu3Lab to Python 3.13,** so Mealie and Seerr use Home Assistant's packages. Done as its

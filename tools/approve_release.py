@@ -34,7 +34,12 @@ from ctl import actions  # noqa: E402
 from ctl.lifecycle import app_releases  # noqa: E402
 from ctl.registry import Service, load  # noqa: E402
 
-_RELEASE_TAG = re.compile(r"^[A-Za-z0-9._+-]{1,80}$")
+_RELEASE_TAG = re.compile(r"^[A-Za-z0-9._+@-]{1,80}$")
+
+
+def _bare(version: str) -> str:
+    """The release number alone: ``n8n@2.48.5`` and ``v2.48.5`` are both ``2.48.5``."""
+    return version.strip().rpartition("@")[2].removeprefix("v")
 
 
 def _version_pattern(version: str) -> re.Pattern[str]:
@@ -45,8 +50,8 @@ def _version_pattern(version: str) -> re.Pattern[str]:
 def plan(service: Service, version: str, overrides: dict[str, str]) -> dict[str, str]:
     """New image references (no digest yet) by Compose service, for ``version``."""
     current = app_releases.approved(service, ROOT)
-    old = current.version.strip().removeprefix("v")
-    new = version.strip().removeprefix("v")
+    old = _bare(current.version)
+    new = _bare(version)
     pattern = _version_pattern(old)
     moved = {}
     for name, image in current.images.items():
@@ -59,6 +64,33 @@ def plan(service: Service, version: str, overrides: dict[str, str]) -> dict[str,
     if unknown:
         raise SystemExit(f"{service.id} has no Compose service named {', '.join(sorted(unknown))}.")
     return moved
+
+
+def overlay_plan(service: Service, version: str, moved: dict[str, str]) -> dict[Path, dict[str, str]]:
+    """New references for override files' images (GPU builds, options) of the repositories that move.
+
+    ``docker-compose.nvidia.yml`` swaps in a CUDA build of the same image; it must move with
+    the main one, even when it already lags behind (``v3.3.5-cuda`` beside ``v3.3.6``).
+    """
+    current = app_releases.approved(service, ROOT)
+    old = _bare(current.version)
+    new = _bare(version)
+    pattern = _version_pattern(old)
+    repositories = {app_releases.split_image(reference)[0] for reference in moved.values()}
+    plans: dict[Path, dict[str, str]] = {}
+    for overlay in sorted(service.compose_path(ROOT).glob("docker-compose.*.yml")):
+        for image in app_releases.compose_images(overlay).values():
+            repository, tag = app_releases.split_image(image)
+            if repository not in repositories or not tag:
+                continue
+            if old and pattern.search(tag):
+                tag = pattern.sub(new, tag)
+            else:
+                tag, count = re.subn(r"^(v?)\d+(?:\.\d+)+", lambda m: m.group(1) + new, tag, count=1)
+                if not count:
+                    raise SystemExit(f"{overlay.name}: can't tell which release {image} is; edit it by hand.")
+            plans.setdefault(overlay, {})[image] = f"{repository}:{tag}"
+    return plans
 
 
 def resolve_digest(reference: str) -> str:
@@ -119,9 +151,22 @@ def approve(app: str, version: str, overrides: dict[str, str]) -> None:
     # Several containers often share one image (Nextcloud's app and its cron job).
     resolved = {reference: resolve_digest(reference) for reference in dict.fromkeys(moved.values())}
     pinned = {name: resolved[reference] for name, reference in moved.items()}
+    overlays = overlay_plan(service, version, moved)
+    for references in overlays.values():
+        for reference in references.values():
+            if reference not in resolved:
+                resolved[reference] = resolve_digest(reference)
     rewrite(service, version, pinned)
     for name, image in pinned.items():
         print(f"  {name}: {image}")
+    for overlay, references in overlays.items():
+        text = overlay.read_text(encoding="utf-8")
+        for old_image, reference in references.items():
+            text = re.sub(
+                rf"(^\s*image:\s*){re.escape(old_image)}\s*$", rf"\g<1>{resolved[reference]}", text, flags=re.M
+            )
+            print(f"  {overlay.name}: {resolved[reference]}")
+        overlay.write_text(text, encoding="utf-8")
     where = (
         "run ./install.sh (foundation apps move only with the installer)"
         if not app_releases.updatable(service)

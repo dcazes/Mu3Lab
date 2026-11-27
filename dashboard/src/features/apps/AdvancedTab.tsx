@@ -15,7 +15,7 @@ import { Card } from '../../components/Layout';
 import { StateBadge } from '../../components/Status';
 import { useApi } from '../../lib/useApi';
 import { useAction } from '../../lib/useAction';
-import { useDashboard } from '../../state/dashboard';
+import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { McpConnectionCard } from '../integrations/McpPanel';
 import { BackupsCard, Interrupted } from './BackupsCard';
 
@@ -96,7 +96,12 @@ export function useApplyUpdate(service: Service) {
   const confirm = useConfirm();
   const { refresh } = useDashboard();
   const { pending, run } = useAction();
-  const apply = async (update: { approved_version: string; supporting_only: boolean; files_only?: boolean }) => {
+  const apply = async (update: {
+    approved_version: string;
+    supporting_only: boolean;
+    files_only?: boolean;
+    source?: string;
+  }) => {
     if (
       !(await confirm({
         title: update.files_only
@@ -105,9 +110,11 @@ export function useApplyUpdate(service: Service) {
             ? `Update ${service.name}’s supporting services?`
             : `Update ${service.name} to ${update.approved_version}?`,
         description: [
+          update.source === 'upstream' &&
+            `${update.approved_version} comes straight from ${service.name}’s makers; Mu3Lab’s automatic checks found nothing in it that needs changes here.`,
           update.files_only
             ? `This version of Mu3Lab changed how ${service.name} is set up; ${service.name} itself stays ${update.approved_version}. Mu3Lab stops ${service.name}, saves a backup of its data, then starts it with the changes. If it doesn't start properly, Mu3Lab puts back the backup and the setup from before automatically. ${service.name} is unavailable for a few minutes.`
-            : `Mu3Lab downloads the new version, stops ${service.name}, saves a backup of its data, then starts the new version. If it doesn't start properly, Mu3Lab puts back the backup and the current version automatically. ${service.name} is unavailable for a few minutes.`,
+            : `Mu3Lab downloads the new version, stops ${service.name}, saves a backup of its data, then starts the new version. If it doesn't start properly, or sign-in, its chat connection or its widgets stop working, Mu3Lab puts back the backup and the current version automatically. ${service.name} is unavailable for a few minutes.`,
           // Core apps reach further than themselves while they are stopped (LiteLLM answers every chat).
           service.stop_warning,
         ]
@@ -128,8 +135,21 @@ export function useApplyUpdate(service: Service) {
   return { run: apply, pending: pending === 'update' };
 }
 
+/** When the server last looked for a newer release, in words. */
+function checkedAgo(when: string): string {
+  const at = Date.parse(when);
+  if (Number.isNaN(at)) return '';
+  const minutes = Math.max(0, Math.round((Date.now() - at) / 60000));
+  if (minutes < 2) return 'just now';
+  if (minutes < 90) return `${minutes} minutes ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 36 ? `${hours} hours ago` : `${Math.round(hours / 24)} days ago`;
+}
+
 function Updates({ service }: { service: Service }) {
   const apply = useApplyUpdate(service);
+  const isAdmin = useIsAdmin();
+  const checking = useAction();
   const installed = service.update?.installed_version ?? '';
   // A local comparison with the release Mu3Lab approves, so it loads straight away.
   const { data: update, reload } = useApi<UpdateResponse>(
@@ -153,6 +173,18 @@ function Updates({ service }: { service: Service }) {
   const sameVersion = Boolean(update?.supporting_only || update?.files_only);
   // Foundation apps (sign-in, passwords, web addresses) move only when ./install.sh runs.
   const foundation = service.stage === 'foundation';
+  const fromMakers = update?.source === 'upstream';
+  // A newer release from the app's makers that Mu3Lab's checks held back for review.
+  const held = update?.upstream?.state === 'held' ? update.upstream : undefined;
+  const checkNow = () =>
+    checking.run(
+      'check',
+      async () => {
+        await postJsonApi(`/api/v1/services/${service.id}/updates/check`, {});
+        await reload();
+      },
+      `Checked ${service.name} for a newer release`,
+    );
   return (
     <Card
       title="Updates"
@@ -165,10 +197,27 @@ function Updates({ service }: { service: Service }) {
       {update && !foundation && installed && !service.recovery && (
         <div className="stack">
           <p>
-            {update.update_available
-              ? `A tested update is ready: ${target}.`
-              : `You’re on the latest tested version (${update.installed_version}).`}
+            {update.update_available && fromMakers
+              ? `A newer release from ${service.name}’s makers is ready: ${target}. It passed Mu3Lab’s automatic checks.`
+              : update.update_available
+                ? `A tested update is ready: ${target}.`
+                : `You’re on the latest version Mu3Lab can offer (${update.installed_version}).`}
           </p>
+          {!update.update_available && held && (
+            <div className="stack">
+              <p className="muted">
+                {service.name} {held.version} is out, but waits for Mu3Lab’s review because:
+              </p>
+              <ul className="muted">
+                {(held.reasons ?? []).map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {update.upstream?.checked_at && (
+            <p className="muted">Checked for newer releases {checkedAgo(update.upstream.checked_at)}.</p>
+          )}
           {update.update_available && (update.removed_services?.length ?? 0) > 0 && (
             <p className="muted">This update removes: {update.removed_services?.join(', ')}.</p>
           )}
@@ -191,6 +240,14 @@ function Updates({ service }: { service: Service }) {
             )}
             {update.update_available && update.release_url && !sameVersion && (
               <ExternalButton href={update.release_url}>Release notes</ExternalButton>
+            )}
+            {!update.update_available && held?.release_url && (
+              <ExternalButton href={held.release_url}>Release notes</ExternalButton>
+            )}
+            {isAdmin && (
+              <Button icon={RefreshCw} loading={checking.pending === 'check'} onClick={() => void checkNow()}>
+                Check now
+              </Button>
             )}
           </div>
         </div>

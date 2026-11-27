@@ -51,6 +51,39 @@ class BoardTests(unittest.TestCase):
         board = clean(_upgrade(legacy), is_admin=False)
         self.assertEqual([(w["x"], w["y"], w["w"], w["h"]) for w in board], [(0, 0, 6, 2), (6, 0, 6, 4)])
 
+    def test_a_group_holds_widgets_on_its_own_grid_and_is_a_title_row_taller(self):
+        board = clean(
+            [
+                {
+                    "id": "g",
+                    "kind": "group",
+                    "x": 0,
+                    "y": 0,
+                    "w": 6,
+                    "h": 2,
+                    "settings": {"title": "  Media   shelf  "},
+                    "children": [
+                        {"id": "a", "kind": "weather", "x": 0, "y": 0, "w": 3, "h": 2},
+                        # Too wide for its spot in the group, and overlapping a: moved below it.
+                        {"id": "a", "kind": "weather", "x": 4, "y": 0, "w": 4, "h": 2},
+                        {"id": "inner", "kind": "group", "x": 0, "y": 4, "w": 2, "h": 2},
+                    ],
+                },
+                {"id": "b", "kind": "weather", "x": 0, "y": 0, "w": 6, "h": 2},
+            ],
+            is_admin=False,
+        )
+        group = board[0]
+        self.assertEqual(group["settings"], {"title": "Media shelf", "collapsed": False})
+        # Groups do not nest; ids stay unique across the whole board.
+        children = group["children"]
+        self.assertEqual([c["kind"] for c in children], ["weather", "weather"])
+        self.assertEqual(len({group["id"], board[1]["id"], *(c["id"] for c in children)}), 4)
+        self.assertEqual([(c["x"], c["y"], c["w"]) for c in children], [(0, 0, 3), (0, 2, 4)])
+        # Its widgets reach row 4, plus the title row; the next widget goes below it.
+        self.assertEqual(group["h"], 5)
+        self.assertEqual((board[1]["x"], board[1]["y"]), (6, 0))
+
     def test_placement_and_hide_on_phone_have_safe_defaults(self):
         self.assertEqual(placement_of("gravity"), "gravity")
         self.assertEqual(placement_of("sideways"), "free")
@@ -82,9 +115,9 @@ class BoardTests(unittest.TestCase):
             ],
             is_admin=False,
         )
-        self.assertEqual(board[0]["settings"], {"symbols": ["AAPL", "VFV.TO"]})
+        self.assertEqual(board[0]["settings"], {"symbols": ["AAPL", "VFV.TO"], "range": "1d"})
         # An impossible place is dropped, and unknown units fall back to Celsius.
-        self.assertEqual(board[1]["settings"], {"units": "celsius"})
+        self.assertEqual(board[1]["settings"], {"units": "celsius", "days": 7})
         self.assertEqual(board[2]["settings"]["place"], {"name": "Toronto", "latitude": 43.7, "longitude": -79.4})
         self.assertEqual(board[3]["settings"], {"view": "auto", "week_start": "sunday"})
 
@@ -98,11 +131,14 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(ids[0], "same")
         self.assertTrue(ids[2].startswith("ask-"))
 
-    def test_a_board_that_is_not_a_list_or_too_long_is_refused(self):
+    def test_a_board_that_is_not_a_list_is_refused(self):
         with self.assertRaises(BoardError):
             clean({"widgets": []}, is_admin=False)
-        with self.assertRaises(BoardError):
-            clean([{"kind": "ask"}] * 25, is_admin=False)
+
+    def test_a_board_holds_any_number_of_widgets(self):
+        board = clean([{"kind": "ask"}] * 60, is_admin=False)
+        self.assertEqual(len(board), 60)
+        self.assertEqual(len({(w["x"], w["y"]) for w in board}), 60)
 
     def test_the_camera_widget_is_for_administrators_only(self):
         widgets = [{"id": "c", "kind": "camera"}, {"id": "t", "kind": "thermostat"}]

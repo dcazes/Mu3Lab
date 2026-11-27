@@ -4,7 +4,9 @@ The server fetches these, not the browser, so phones away from home need no extr
 only coordinates and ticker symbols leave the house: never who is asking.
 
 - Weather and place search: Open-Meteo (free, no account or key).
-- Stock prices: Yahoo Finance's public chart data (no account or key).
+- Stock prices and the day's top movers: Yahoo Finance's public data (no account or key).
+- Currency rates: the European Central Bank's daily reference rates, through Frankfurter.
+- News feeds (RSS and Atom): the feeds the person adds, public addresses only.
 - Ask: the household's own chat model through LiteLLM, told what every installed app is for,
   the same guide the main chat assistant has.
 
@@ -13,6 +15,7 @@ Answers are kept a few minutes, so a board open on several screens asks once.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -29,6 +32,12 @@ AGENT = {"User-Agent": "Mu3Lab home widgets"}
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 PLACES_URL = "https://geocoding-api.open-meteo.com/v1/search"
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+MOVERS_URL = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
+RATES_URL = "https://api.frankfurter.dev/v1/latest"
+RATES_SECONDS = 86400
+FEED_SECONDS = 900
+FEED_BYTES = 2_000_000
+FEED_ITEMS = 30
 WEATHER_SECONDS = 600
 STOCK_SECONDS = 60
 PLACE_SECONDS = 86400
@@ -71,8 +80,12 @@ def _get(url: str, params: dict[str, Any], what: str) -> Any:
     return response.json()
 
 
+# Open-Meteo forecasts up to 16 days; the widget shows as many of these as the person chooses.
+FORECAST_DAYS = 14
+
+
 def weather(latitude: float, longitude: float, units: str) -> dict[str, Any]:
-    """Now and the next seven days at one place, in the place's own time zone."""
+    """Now and the next two weeks at one place, in the place's own time zone."""
     fahrenheit = units == "fahrenheit"
     key = ("weather", round(latitude, 2), round(longitude, 2), fahrenheit)
 
@@ -86,7 +99,7 @@ def weather(latitude: float, longitude: float, units: str) -> dict[str, Any]:
                 "wind_speed_10m,is_day",
                 "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
                 "timezone": "auto",
-                "forecast_days": 7,
+                "forecast_days": FORECAST_DAYS,
                 "temperature_unit": "fahrenheit" if fahrenheit else "celsius",
                 "wind_speed_unit": "mph" if fahrenheit else "kmh",
             },
@@ -95,15 +108,17 @@ def weather(latitude: float, longitude: float, units: str) -> dict[str, Any]:
         if not data:
             raise WidgetError("The weather service has no forecast for this place.")
         current, daily = data.get("current") or {}, data.get("daily") or {}
+        dates = daily.get("time") or []
+        rain = daily.get("precipitation_probability_max") or [None] * len(dates)
         days = [
             {
                 "date": date,
                 "code": int(daily["weather_code"][index] or 0),
                 "high": daily["temperature_2m_max"][index],
                 "low": daily["temperature_2m_min"][index],
-                "rain_chance": (daily.get("precipitation_probability_max") or [None] * 7)[index],
+                "rain_chance": rain[index] if index < len(rain) else None,
             }
-            for index, date in enumerate(daily.get("time") or [])
+            for index, date in enumerate(dates)
         ]
         return {
             "ok": True,
@@ -145,16 +160,36 @@ def places(query: str) -> list[dict[str, Any]]:
     return _remember(("places", name.lower()), PLACE_SECONDS, fetch)
 
 
-def _quote(symbol: str) -> dict[str, Any]:
+# How far back each range looks, and the steps Yahoo gives for it (enough points for a small chart).
+INTERVALS = {"1d": "5m", "5d": "30m", "1mo": "1d", "6mo": "1d", "ytd": "1d", "1y": "1d", "5y": "1wk"}
+MAX_POINTS = 120
+
+
+def _thinned(values: list[float]) -> list[float]:
+    """At most ``MAX_POINTS`` evenly spread, always keeping the latest."""
+    if len(values) <= MAX_POINTS:
+        return values
+    step = (len(values) - 1) / (MAX_POINTS - 1)
+    return [values[round(index * step)] for index in range(MAX_POINTS)]
+
+
+def _quote(symbol: str, span: str = "1d") -> dict[str, Any]:
+    span = span if span in INTERVALS else "1d"
+
     def fetch() -> dict[str, Any]:
-        data = _get(CHART_URL.format(symbol=symbol), {"range": "1d", "interval": "5m"}, "Yahoo Finance")
+        data = _get(CHART_URL.format(symbol=symbol), {"range": span, "interval": INTERVALS[span]}, "Yahoo Finance")
         result = ((data or {}).get("chart") or {}).get("result") or []
         if not result:
             return {"symbol": symbol, "found": False}
         meta = result[0].get("meta") or {}
         closes = (((result[0].get("indicators") or {}).get("quote") or [{}])[0].get("close")) or []
+        points = [round(value, 4) for value in closes if value is not None]
         price = meta.get("regularMarketPrice")
-        previous = meta.get("chartPreviousClose") or meta.get("previousClose")
+        # Today: against yesterday's close. A longer range: against where it began.
+        if span == "1d":
+            previous = meta.get("chartPreviousClose") or meta.get("previousClose")
+        else:
+            previous = points[0] if points else meta.get("chartPreviousClose")
         change = price - previous if price is not None and previous else None
         return {
             "symbol": symbol,
@@ -164,14 +199,15 @@ def _quote(symbol: str) -> dict[str, Any]:
             "change": change,
             "change_percent": change / previous * 100 if change is not None and previous else None,
             "currency": str(meta.get("currency") or ""),
-            "points": [round(value, 4) for value in closes if value is not None][-80:],
+            "points": _thinned(points),
         }
 
-    return _remember(("stock", symbol), STOCK_SECONDS, fetch)
+    # Today's line moves every minute; a longer range barely changes in a few minutes.
+    return _remember(("stock", symbol, span), STOCK_SECONDS if span == "1d" else STOCK_SECONDS * 5, fetch)
 
 
-def stocks(symbols: list[str]) -> list[dict[str, Any]]:
-    return [_quote(symbol) for symbol in symbols]
+def stocks(symbols: list[str], span: str = "1d") -> list[dict[str, Any]]:
+    return [_quote(symbol, span) for symbol in symbols]
 
 
 def _guide() -> str:
@@ -240,3 +276,190 @@ def ask(question: str, *, person: str, uid: str, paths: RuntimePaths | None = No
     if not answer:
         raise WidgetError("The chat model gave an empty answer. Try asking another way.")
     return answer
+
+
+# ---------- The day's top movers ----------
+
+MOVER_SCREENS = {"gainers": "day_gainers", "losers": "day_losers", "active": "most_actives"}
+
+
+def movers(which: str, symbols: list[str] | None = None) -> list[dict[str, Any]]:
+    """Yahoo Finance's day gainers, losers or most traded (or the person's own tickers): symbol,
+    name, price and today's change, for a ticker that runs along the board."""
+    if which == "mine":
+        return [
+            {key: quote.get(key) for key in ("symbol", "name", "price", "change_percent", "currency")}
+            for quote in stocks(symbols or [])
+            if quote.get("found")
+        ]
+    screen = MOVER_SCREENS.get(which, MOVER_SCREENS["gainers"])
+
+    def fetch() -> list[dict[str, Any]]:
+        data = _get(MOVERS_URL, {"scrIds": screen, "count": 25}, "Yahoo Finance")
+        result = (((data or {}).get("finance") or {}).get("result") or [{}])[0] or {}
+        found = []
+        for quote in result.get("quotes") or []:
+            price = quote.get("regularMarketPrice")
+            if not quote.get("symbol") or price is None:
+                continue
+            found.append(
+                {
+                    "symbol": str(quote["symbol"])[:15],
+                    "name": str(quote.get("shortName") or quote.get("longName") or quote["symbol"])[:60],
+                    "price": price,
+                    "change_percent": quote.get("regularMarketChangePercent"),
+                    "currency": str(quote.get("currency") or ""),
+                }
+            )
+        return found
+
+    return _remember(("movers", screen), STOCK_SECONDS * 5, fetch)
+
+
+# ---------- Currency rates ----------
+
+CURRENCY = re.compile(r"^[A-Z]{3}$")
+
+
+def rates(base: str) -> dict[str, Any]:
+    """Today's reference rates from ``base`` to every other currency the ECB publishes (a day's cache)."""
+    base = base.upper() if CURRENCY.match(base.upper()) else "USD"
+
+    def fetch() -> dict[str, Any]:
+        data = _get(RATES_URL, {"base": base}, "The currency rates service")
+        if not isinstance(data, dict) or not isinstance(data.get("rates"), dict):
+            raise WidgetError("The currency rates service did not give today's rates. Try again later.")
+        return {
+            "base": base,
+            "date": str(data.get("date") or ""),
+            "rates": {str(code): float(value) for code, value in data["rates"].items() if CURRENCY.match(str(code))},
+        }
+
+    return _remember(("rates", base), RATES_SECONDS, fetch)
+
+
+# ---------- News feeds ----------
+
+
+def _public_fetch(url: str) -> bytes:
+    """A public web address's body, at most ``FEED_BYTES``: never this server's, the home network's or
+    the tailnet's (checked before asking, after every redirect, and against who actually answered)."""
+    import ipaddress
+
+    from ctl.home_search import SearchError, public_address
+
+    for _ in range(4):
+        try:
+            url = public_address(url)
+        except SearchError as exc:
+            raise WidgetError(str(exc)) from None
+        try:
+            with httpx.stream("GET", url, headers=AGENT, timeout=10, follow_redirects=False) as response:
+                stream = response.extensions.get("network_stream")
+                peer = stream.get_extra_info("server_addr") if stream is not None else None
+                if peer and not ipaddress.ip_address(str(peer[0]).split("%")[0]).is_global:
+                    raise WidgetError("Only public feeds can be read here.")
+                if response.is_redirect and response.headers.get("location"):
+                    url = str(response.url.join(response.headers["location"]))
+                    continue
+                if not response.is_success:
+                    raise WidgetError(f"The feed did not answer (HTTP {response.status_code}).")
+                body = b""
+                for chunk in response.iter_bytes():
+                    body += chunk
+                    if len(body) > FEED_BYTES:
+                        raise WidgetError("That feed is too large to show here.")
+                return body
+        except httpx.HTTPError:
+            raise WidgetError("The feed could not be reached.") from None
+    raise WidgetError("The feed sent Mu3Lab round too many redirects.")
+
+
+def _plain(text: str | None, limit: int) -> str:
+    import html
+    import re
+
+    cleaned = re.sub(r"<[^>]+>", " ", html.unescape(text or ""))
+    return " ".join(html.unescape(cleaned).split())[:limit]
+
+
+def _feed_items(body: bytes) -> tuple[str, list[dict[str, Any]]]:
+    """RSS 2.0, RSS 1.0 or Atom as (feed title, items). Entities are refused outright, so no feed can
+    blow up the parser or point it at a file."""
+    import xml.etree.ElementTree as ElementTree
+    from datetime import datetime
+    from email.utils import parsedate_to_datetime
+
+    if b"<!ENTITY" in body or b"<!entity" in body:
+        raise WidgetError("That feed could not be read.")
+    try:
+        root = ElementTree.fromstring(body)
+    except ElementTree.ParseError:
+        raise WidgetError("That address is not a news feed.") from None
+
+    def local(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1].lower()
+
+    def child(node: Any, *names: str) -> Any:
+        return next((item for item in node if local(item.tag) in names), None)
+
+    def when(text: str | None) -> float:
+        if not text:
+            return 0.0
+        try:
+            return parsedate_to_datetime(text).timestamp()
+        except (TypeError, ValueError):
+            pass
+        try:
+            return datetime.fromisoformat(text.strip().replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+
+    items: list[dict[str, Any]] = []
+    channel = child(root, "channel")
+    title = ""
+    if local(root.tag) == "feed":  # Atom
+        title = _plain(getattr(child(root, "title"), "text", ""), 80)
+        for entry in (item for item in root if local(item.tag) == "entry"):
+            link = next(
+                (
+                    item.get("href", "")
+                    for item in entry
+                    if local(item.tag) == "link" and item.get("rel", "alternate") == "alternate"
+                ),
+                "",
+            )
+            summary = child(entry, "summary", "content")
+            items.append(
+                {
+                    "title": _plain(getattr(child(entry, "title"), "text", ""), 200),
+                    "url": link,
+                    "summary": _plain(getattr(summary, "text", ""), 300),
+                    "published": when(getattr(child(entry, "published", "updated"), "text", None)),
+                }
+            )
+    else:  # RSS 2.0 (items in the channel) or RSS 1.0 (items beside it)
+        title = _plain(getattr(child(channel, "title") if channel is not None else None, "text", ""), 80)
+        holders = [channel, root] if channel is not None else [root]
+        for holder in holders:
+            for entry in (item for item in holder if local(item.tag) == "item"):
+                items.append(
+                    {
+                        "title": _plain(getattr(child(entry, "title"), "text", ""), 200),
+                        "url": (getattr(child(entry, "link"), "text", "") or "").strip(),
+                        "summary": _plain(getattr(child(entry, "description", "encoded"), "text", ""), 300),
+                        "published": when(getattr(child(entry, "pubdate", "date"), "text", None)),
+                    }
+                )
+    clean = [item for item in items if item["title"] and str(item["url"]).lower().startswith(("https://", "http://"))]
+    return title, clean[:FEED_ITEMS]
+
+
+def feed(url: str) -> dict[str, Any]:
+    """One news feed's newest items: title, link, a short summary and when (kept 15 minutes)."""
+
+    def fetch() -> dict[str, Any]:
+        title, items = _feed_items(_public_fetch(url))
+        return {"url": url, "title": title, "items": items}
+
+    return _remember(("feed", url), FEED_SECONDS, fetch)

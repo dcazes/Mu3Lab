@@ -1,6 +1,8 @@
 """Update one app to the release Mu3Lab approves, or put it back exactly as it was.
 
-1. Download the new release's images while the app keeps running.
+1. Download the new release's images while the app keeps running. A queued
+   update's download may already have started, several apps at once
+   (``ctl.update_downloads``); the job then waits for it.
 2. Save a copy of the whole deployment and note the update (``in_progress``).
 3. Prepare and check the new release's files, still while the app runs.
 4. Stop the app and back up its data (the backup an undo puts back).
@@ -15,9 +17,15 @@ chooses "Undo update" (``undo``, the default) or, once the new release was
 in place, "Keep new version" (``keep``).
 
 Mu3Lab's own changes to an app's files, with the same images (``files_only``),
-take the same steps. A start after the files changed (the new ones, or the old
-ones put back) rebuilds the images Mu3Lab builds from source, so the files in
-place are the ones that run.
+take the same steps, except that no data backup is taken first when the images
+stay exactly the same (none Mu3Lab builds changes either): the same program
+cannot have migrated the data, and the deployment copy puts the old files back.
+A start after the files changed (the new ones, or the old ones put back)
+rebuilds the images Mu3Lab builds from source when their files changed
+(``ctl.lifecycle.builds``), so the files in place are the ones that run.
+
+Chat assistants are brought in step once, by the worker, after the last update
+waiting (``chat_ops.deferred_sync``), not at each app's stop and start.
 """
 
 from __future__ import annotations
@@ -26,10 +34,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ctl import actions, backups, database_dumps, job_guard
+from ctl import actions, backups, chat_ops, database_dumps, job_guard, update_downloads
 from ctl.engine.runtime import render_service
-from ctl.jobs import redact
-from ctl.lifecycle import app_control, app_releases, deployments, in_progress, restore
+from ctl.jobs import JobStore, redact
+from ctl.lifecycle import app_control, app_releases, builds, deployments, in_progress, restore, update_checks, upstream
 from ctl.lifecycle.app_releases import Release
 from ctl.lifecycle.uninstall import backed_up, data_directories
 from ctl.registry import Service
@@ -57,7 +65,43 @@ def _validate(service: Service, root: Path, log: Log) -> None:
         raise RuntimeError(f"The new release's settings are not valid: {output[-300:]}")
 
 
+def cancellable(store: JobStore, job: dict[str, Any]) -> bool:
+    """Whether cancelling this update stops it with nothing changed: waiting, or still downloading.
+
+    Once it saves its deployment and stops the app it runs to the end (``job_guard.uncancellable``):
+    the new version healthy, or the old one put back.
+    """
+    if job.get("state") == "queued":
+        return True
+    if job.get("state") != "running":
+        return False
+    stages = [str(event.get("detail") or "") for event in store.events(str(job["id"])) if event.get("event") == "stage"]
+    return not stages or stages[-1].startswith("download_images:")
+
+
+def target_images(service: Service, root: Path, paths: RuntimePaths | None = None) -> tuple[str, ...]:
+    """The images the update's release runs (Mu3Lab's, or a screened newer one), for the installed build."""
+    previous = app_releases.installed(service, root, paths)
+    target = app_releases.target(service, root, previous.variant if previous else "cpu", paths)
+    return tuple(dict.fromkeys(target.images.values()))
+
+
 def update(
+    service: Service,
+    root: Path,
+    requested: str,
+    log: Log,
+    step: Step,
+    *,
+    job_id: str,
+    running: bool,
+    paths: RuntimePaths | None = None,
+) -> str:
+    with chat_ops.deferred_sync():
+        return _update(service, root, requested, log, step, job_id=job_id, running=running, paths=paths)
+
+
+def _update(
     service: Service,
     root: Path,
     requested: str,
@@ -74,12 +118,13 @@ def update(
             f"Nothing changed: an earlier restore or update of {service.name} was interrupted. Put it back first.",
             "recovery_required",
         )
-    state = app_releases.status(service, root)
+    state = app_releases.status(service, root, paths)
     previous = app_releases.installed(service, root, paths)
-    target = app_releases.approved(service, root, previous.variant if previous else "cpu")
+    target = app_releases.target(service, root, previous.variant if previous else "cpu", paths)
+    from_makers = app_releases.source(service, root, target) == "upstream"
     if target.version != requested:
         raise UpdateFailed(
-            f"Mu3Lab now approves {service.name} {target.version} instead of {requested}. Check for updates again.",
+            f"The update for {service.name} is now {target.version} instead of {requested}. Check for updates again.",
             "approval_changed",
         )
     if not state["update_available"]:
@@ -90,8 +135,8 @@ def update(
     else:
         step("download_images", f"Downloading {service.name} {target.version}. The app keeps running meanwhile.")
     try:
-        app_releases.download(target.images, log)
-    except RuntimeError as exc:
+        update_downloads.ensure(service.id, job_id, tuple(dict.fromkeys(target.images.values())), log)
+    except update_downloads.DownloadFailed as exc:
         raise UpdateFailed(f"Nothing changed: {exc}", "image_pull_failed") from exc
     with job_guard.uncancellable():
         bundle = deployments.capture(
@@ -120,7 +165,15 @@ def update(
             deployments.restore(service, bundle, paths)
             in_progress.clear(service.id, paths)
             raise UpdateFailed(f"Nothing changed: {exc}", "definition_invalid") from exc
-        step("backup", f"Stopping {service.name} and saving a backup of {current}.")
+        # What works now must still work afterwards: sign-in, chat connections, Home widgets.
+        working = update_checks.baseline(service, root, log) if running else []
+        # Only Mu3Lab's setup changed and every image stays as it is: the same program cannot have
+        # migrated the data, so the deployment copy above is all an undo needs.
+        same_program = bool(state["files_only"]) and not builds.needed(service.id, app_control.project(service, root))
+        if same_program:
+            step("backup", f"Stopping {service.name}; its data needs no backup, as its program stays the same.")
+        else:
+            step("backup", f"Stopping {service.name} and saving a backup of {current}.")
         saved: dict[str, Any] | None = None
         try:
             app_control.stop(service, root, log)
@@ -128,7 +181,9 @@ def update(
             folders = backed_up(service, data_directories(service, root)) if service.manifest.backup.include else []
             # An app with no data folders on this server (LiveKit, Kopia) has nothing a backup could hold;
             # the deployment copy above is all an undo needs.
-            if backups.sources(folders, paths):
+            if same_program:
+                log(f"No backup of {service.name} is saved first: only Mu3Lab's setup for it changes.")
+            elif backups.sources(folders, paths):
                 # Its databases are dumped as for any backup, so this one restores the same way.
                 database_dumps.write(service, root, log, paths)
                 saved = backups.snapshot(
@@ -159,10 +214,16 @@ def update(
         if started:
             if not running:
                 app_control.stop(service, root, log)
-            in_progress.clear(service.id, paths)
             _refresh_route(service, root, log)
             _refresh_connectors(service, root, log, running=running)
             _rewire_consumers(service, root, log, paths)
+            if working:
+                step("check_update", f"Checking that {service.name} still works as it did before the update.")
+            broken = update_checks.regressions(service, root, working, log)
+            if broken:
+                _put_back_broken(service, root, log, step, note, current, target, broken, kept, paths, from_makers)
+            # Only now is the update done: an interruption above still offers to undo it.
+            in_progress.clear(service.id, paths)
             try:
                 deployments.prune(service.id, set(), paths)
             except OSError as exc:
@@ -188,6 +249,40 @@ def update(
     raise UpdateFailed(
         f"{service.name} {target.version} did not start ({cause}), so Mu3Lab put back {current} with its data and "
         "settings from just before; nothing was lost.",
+        "update_rolled_back",
+    )
+
+
+def _put_back_broken(
+    service: Service,
+    root: Path,
+    log: Log,
+    step: Step,
+    note: dict[str, Any],
+    current: str,
+    target: Release,
+    broken: list[str],
+    kept: str,
+    paths: RuntimePaths,
+    from_makers: bool,
+) -> None:
+    """The new release started, but something that worked before does not: put everything back. Raises."""
+    what = ", ".join(broken)
+    step("put_back", f"{target.version} broke {what}; putting back {current} and its data.")
+    if from_makers:
+        upstream.mark_failed(service.id, target.version, f"{target.version} broke {what} on this server.", paths)
+    try:
+        undo(service, root, log, note, paths)
+    except restore.PutBackFailed as failed:
+        raise UpdateFailed(
+            f"{service.name} {target.version} broke {what}, and putting back {current} did not finish: {failed}.{kept}",
+            "update_put_back_failed",
+        ) from None
+    _refresh_route(service, root, log)
+    _refresh_connectors(service, root, log, running=note.get("was_running", True))
+    raise UpdateFailed(
+        f"{service.name} {target.version} started, but {what} stopped working, so Mu3Lab put back {current} with "
+        "its data and settings from just before; nothing was lost.",
         "update_rolled_back",
     )
 
@@ -283,7 +378,7 @@ def _refresh_route(service: Service, root: Path, log: Log) -> None:
     from ctl.routes import apply as apply_route
 
     registry = load_registry()
-    routed, detail = apply_route(registry, service, root, log)
+    routed, detail = apply_route(registry, service, root, log, only_if_changed=True)
     if not routed:
         log(f"{service.name}'s private address was not refreshed: {redact(detail)}")
         return

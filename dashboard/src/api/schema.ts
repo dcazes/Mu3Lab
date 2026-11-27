@@ -725,9 +725,29 @@ export interface paths {
     post?: never;
     /**
      * Reset Board
-     * @description Back to the starter set.
+     * @description Back to the starter set (that board only, when the person keeps several).
      */
     delete: operations['reset_board_api_v1_home_board_delete'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/home/board/tabs': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Save Board Tabs
+     * @description The person's boards renamed, reordered, added or removed, all at once.
+     */
+    put: operations['save_board_tabs_api_v1_home_board_tabs_put'];
+    post?: never;
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -774,6 +794,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/home/feeds': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read Feeds
+     * @description The newest items of each news feed asked for; a feed that cannot be read says why.
+     */
+    get: operations['read_feeds_api_v1_home_feeds_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/home/movers': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read Movers
+     * @description The day's top movers on Yahoo Finance (gainers, losers, most traded), or the person's own tickers.
+     */
+    get: operations['read_movers_api_v1_home_movers_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/home/places': {
     parameters: {
       query?: never;
@@ -783,6 +843,26 @@ export interface paths {
     };
     /** Search Places */
     get: operations['search_places_api_v1_home_places_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/home/rates': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read Rates
+     * @description Today's currency reference rates (the European Central Bank's), for the conversion widget.
+     */
+    get: operations['read_rates_api_v1_home_rates_get'];
     put?: never;
     post?: never;
     delete?: never;
@@ -881,7 +961,8 @@ export interface paths {
     put?: never;
     /**
      * Widget Action
-     * @description A ticked box in an app widget (a habit done, a chore finished): the app records it.
+     * @description A ticked box in an app widget (a habit done, a chore finished), or a view's change (a note
+     *     saved): the app records it, as the person.
      */
     post: operations['widget_action_api_v1_home_widgets__kind__action_post'];
     delete?: never;
@@ -900,8 +981,29 @@ export interface paths {
     /**
      * Widget Data
      * @description An app widget's figures for the person's board; ``fresh`` asks the app again (Refresh).
+     *     ``settings``: that widget's own settings as JSON (which document a notes widget shows).
      */
     get: operations['widget_data_api_v1_home_widgets__kind__data_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/home/widgets/{kind}/file/{name}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Widget File
+     * @description One file an app widget shows (a slideshow's photo), read from the app with the viewer's own access.
+     */
+    get: operations['widget_file_api_v1_home_widgets__kind__file__name__get'];
     put?: never;
     post?: never;
     delete?: never;
@@ -1609,6 +1711,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/service-updates/cancel': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel Updates
+     * @description Stop every app update that is still waiting or downloading; those switching versions finish.
+     */
+    post: operations['cancel_updates_api_v1_service_updates_cancel_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/services': {
     parameters: {
       query?: never;
@@ -1759,6 +1881,26 @@ export interface paths {
     get: operations['service_updates_api_v1_services__service_id__updates_get'];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/services/{service_id}/updates/check': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Check Service Updates
+     * @description Look for a newer release from the app's makers now, and screen it, instead of waiting for the daily check.
+     */
+    post: operations['check_service_updates_api_v1_services__service_id__updates_check_post'];
     delete?: never;
     options?: never;
     head?: never;
@@ -3163,6 +3305,53 @@ export interface components {
       /** Used */
       used: number;
     };
+    /** Feed */
+    Feed: {
+      /**
+       * Error
+       * @default
+       */
+      error?: string;
+      /**
+       * Items
+       * @default []
+       */
+      items?: components['schemas']['FeedItem'][];
+      /**
+       * Title
+       * @default
+       */
+      title?: string;
+      /** Url */
+      url: string;
+    };
+    /** FeedItem */
+    FeedItem: {
+      /**
+       * Published
+       * @default 0
+       */
+      published?: number;
+      /**
+       * Summary
+       * @default
+       */
+      summary?: string;
+      /** Title */
+      title: string;
+      /** Url */
+      url: string;
+    };
+    /** FeedsResponse */
+    FeedsResponse: {
+      /** Feeds */
+      feeds: components['schemas']['Feed'][];
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+    };
     /**
      * GpuMemory
      * @description Graphics memory of the NVIDIA GPUs, all cards added up, in bytes.
@@ -3212,6 +3401,16 @@ export interface components {
        * @enum {string}
        */
       placement: 'free' | 'gravity';
+      /**
+       * Tab
+       * @default home
+       */
+      tab?: string;
+      /**
+       * Tabs
+       * @default []
+       */
+      tabs?: components['schemas']['HomeBoardTab'][];
       /** Widgets */
       widgets: components['schemas']['HomeWidget'][];
     };
@@ -3228,10 +3427,43 @@ export interface components {
        * @enum {string}
        */
       placement?: 'free' | 'gravity';
+      /**
+       * Tab
+       * @default
+       */
+      tab?: string;
       /** Widgets */
       widgets: {
         [key: string]: components['schemas']['JsonValue'];
       }[];
+    };
+    /** HomeBoardTab */
+    HomeBoardTab: {
+      /**
+       * Id
+       * @default
+       */
+      id?: string;
+      /** Name */
+      name: string;
+    };
+    /** HomeBoardTabs */
+    HomeBoardTabs: {
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /** Tabs */
+      tabs: components['schemas']['HomeBoardTab'][];
+    };
+    /**
+     * HomeBoardTabsRequest
+     * @description Every board the person keeps, in order: renamed, moved, new (no id) or left out (removed).
+     */
+    HomeBoardTabsRequest: {
+      /** Tabs */
+      tabs: components['schemas']['HomeBoardTab'][];
     };
     /** HomeKitDevice */
     HomeKitDevice: {
@@ -3256,6 +3488,11 @@ export interface components {
     };
     /** HomeWidget */
     HomeWidget: {
+      /**
+       * Children
+       * @default []
+       */
+      children?: components['schemas']['HomeWidget'][];
       /** H */
       h: number;
       /**
@@ -3263,6 +3500,11 @@ export interface components {
        * @default false
        */
       hide_on_phone?: boolean;
+      /**
+       * Hide Title
+       * @default false
+       */
+      hide_title?: boolean;
       /** Id */
       id: string;
       /** Kind */
@@ -3274,6 +3516,11 @@ export interface components {
       settings?: {
         [key: string]: components['schemas']['JsonValue'];
       };
+      /**
+       * Title
+       * @default
+       */
+      title?: string;
       /** W */
       w: number;
       /** X */
@@ -3285,6 +3532,35 @@ export interface components {
     HomeWidgetAction: {
       /** Action */
       action: string;
+      /**
+       * Data
+       * @default {}
+       */
+      data?: {
+        [key: string]: components['schemas']['JsonValue'];
+      };
+      /**
+       * Settings
+       * @default {}
+       */
+      settings?: {
+        [key: string]: components['schemas']['JsonValue'];
+      };
+    };
+    /** HomeWidgetActionResult */
+    HomeWidgetActionResult: {
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /**
+       * Result
+       * @default {}
+       */
+      result?: {
+        [key: string]: components['schemas']['JsonValue'];
+      };
     };
     /**
      * HomeWidgetData
@@ -3345,6 +3621,13 @@ export interface components {
        * @default 0
        */
       updated_at?: number;
+      /**
+       * View
+       * @default {}
+       */
+      view?: {
+        [key: string]: components['schemas']['JsonValue'];
+      };
     };
     /** HomeWidgetItem */
     HomeWidgetItem: {
@@ -3426,6 +3709,11 @@ export interface components {
       refresh_seconds?: number | null;
       /** Title */
       title?: string | null;
+      /**
+       * View
+       * @default figures
+       */
+      view?: string;
       /** W */
       w: number;
     };
@@ -3611,6 +3899,8 @@ export interface components {
       id: string;
       /** Kind */
       kind: string;
+      /** Queue Position */
+      queue_position?: number | null;
       /** Service Id */
       service_id: string;
       /** State */
@@ -3619,6 +3909,16 @@ export interface components {
       step_id?: string | null;
       /** Updated At */
       updated_at: string;
+    };
+    /** JobCancelResponse */
+    JobCancelResponse: {
+      /** Ok */
+      ok: boolean;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'cancelled' | 'cancelling';
     };
     /** JobDetailResponse */
     JobDetailResponse: {
@@ -3915,6 +4215,35 @@ export interface components {
       installed: boolean;
       /** Name */
       name: string;
+    };
+    /** Mover */
+    Mover: {
+      /** Change Percent */
+      change_percent?: number | null;
+      /**
+       * Currency
+       * @default
+       */
+      currency?: string;
+      /**
+       * Name
+       * @default
+       */
+      name?: string;
+      /** Price */
+      price?: number | null;
+      /** Symbol */
+      symbol: string;
+    };
+    /** MoversResponse */
+    MoversResponse: {
+      /** Movers */
+      movers: components['schemas']['Mover'][];
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
     };
     /** Mu3LabChangelog */
     Mu3LabChangelog: {
@@ -4384,6 +4713,22 @@ export interface components {
       id: string;
       /** State */
       state: string;
+    };
+    /** RatesResponse */
+    RatesResponse: {
+      /** Base */
+      base: string;
+      /** Date */
+      date: string;
+      /**
+       * Ok
+       * @default true
+       */
+      ok?: boolean;
+      /** Rates */
+      rates: {
+        [key: string]: number;
+      };
     };
     /**
      * RecoverySheet
@@ -4869,6 +5214,12 @@ export interface components {
       installed_version: string;
       /** Repository */
       repository: string;
+      /**
+       * Source
+       * @default mu3lab
+       * @enum {string}
+       */
+      source?: 'mu3lab' | 'upstream';
       /** Supporting Only */
       supporting_only: boolean;
       /** Update Available */
@@ -5173,12 +5524,44 @@ export interface components {
       removed_services?: string[];
       /** Repository */
       repository: string;
+      /**
+       * Source
+       * @default mu3lab
+       * @enum {string}
+       */
+      source?: 'mu3lab' | 'upstream';
       /** Supporting Only */
       supporting_only: boolean;
       /** Update Available */
       update_available: boolean;
       /** Update Enabled */
       update_enabled: boolean;
+      upstream?: components['schemas']['UpstreamRelease'] | null;
+    };
+    /** UpdatesCancelResponse */
+    UpdatesCancelResponse: {
+      /** Cancelled */
+      cancelled: string[];
+      /** Finishing */
+      finishing: string[];
+      /** Ok */
+      ok: boolean;
+    };
+    /**
+     * UpstreamRelease
+     * @description The newest release this server found from the app's makers, and what Mu3Lab's checks made of it.
+     */
+    UpstreamRelease: {
+      /** Checked At */
+      checked_at: string;
+      /** Reasons */
+      reasons?: string[];
+      /** Release Url */
+      release_url: string;
+      /** State */
+      state: string;
+      /** Version */
+      version: string;
     };
     /** VaultAutomatic */
     VaultAutomatic: {
@@ -9681,7 +10064,9 @@ export interface operations {
   };
   read_board_api_v1_home_board_get: {
     parameters: {
-      query?: never;
+      query?: {
+        tab?: string;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -9851,7 +10236,9 @@ export interface operations {
   };
   reset_board_api_v1_home_board_delete: {
     parameters: {
-      query?: never;
+      query?: {
+        tab?: string;
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -9865,6 +10252,93 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['HomeBoard'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  save_board_tabs_api_v1_home_board_tabs_put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['HomeBoardTabsRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HomeBoardTabs'];
         };
       };
       /** @description Bad Request */
@@ -10438,6 +10912,177 @@ export interface operations {
       };
     };
   };
+  read_feeds_api_v1_home_feeds_get: {
+    parameters: {
+      query?: {
+        url?: string[];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FeedsResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  read_movers_api_v1_home_movers_get: {
+    parameters: {
+      query?: {
+        list?: string;
+        symbols?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MoversResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
   search_places_api_v1_home_places_get: {
     parameters: {
       query?: {
@@ -10456,6 +11101,91 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['PlacesResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  read_rates_api_v1_home_rates_get: {
+    parameters: {
+      query?: {
+        base?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RatesResponse'];
         };
       };
       /** @description Bad Request */
@@ -10697,6 +11427,7 @@ export interface operations {
     parameters: {
       query?: {
         symbols?: string;
+        range?: string;
       };
       header?: never;
       path?: never;
@@ -11056,7 +11787,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['OkResponse'];
+          'application/json': components['schemas']['HomeWidgetActionResult'];
         };
       };
       /** @description Bad Request */
@@ -11128,6 +11859,7 @@ export interface operations {
     parameters: {
       query?: {
         fresh?: boolean;
+        settings?: string;
       };
       header?: never;
       path: {
@@ -11144,6 +11876,94 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['HomeWidgetData'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  widget_file_api_v1_home_widgets__kind__file__name__get: {
+    parameters: {
+      query?: {
+        settings?: string;
+      };
+      header?: never;
+      path: {
+        kind: string;
+        name: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The file, read from the app as the viewer. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'image/*': unknown;
         };
       };
       /** @description Bad Request */
@@ -11819,7 +12639,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['JobResponse'];
+          'application/json': components['schemas']['JobCancelResponse'];
         };
       };
       /** @description Bad Request */
@@ -14872,6 +15692,89 @@ export interface operations {
       };
     };
   };
+  cancel_updates_api_v1_service_updates_cancel_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UpdatesCancelResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
   list_services_api_v1_services_get: {
     parameters: {
       query?: never;
@@ -15649,6 +16552,91 @@ export interface operations {
     };
   };
   service_updates_api_v1_services__service_id__updates_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        service_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UpdateResponse'];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Unprocessable Content */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ApiErrorResponse'];
+        };
+      };
+    };
+  };
+  check_service_updates_api_v1_services__service_id__updates_check_post: {
     parameters: {
       query?: never;
       header?: never;

@@ -21,7 +21,7 @@ widgets:
   refresh_seconds: 60
   largest: [12, 12]
   start: [4, 4]
-version: "v3.30.0"
+version: "v3.31.0"
 upstream: mealie-recipes/mealie
 service:
   local_port: 9925

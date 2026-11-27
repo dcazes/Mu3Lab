@@ -31,6 +31,7 @@ def _minutes(value: Any) -> str:
 def baby(ctx: WidgetContext) -> dict[str, Any]:
     token = ctx.credentials(CONNECTOR).get(TOKEN_ENV, "")
     if not token:
+        ctx.require_connection(CONNECTOR)
         raise WidgetError("Mu3Lab's Baby Buddy token is missing; reinstall Baby Buddy from its page in Apps.")
     headers = {"Authorization": f"Token {token}"}
     children = (ctx.get("/api/children/", headers=headers) or {}).get("results") or []

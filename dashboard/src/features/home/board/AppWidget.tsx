@@ -19,10 +19,10 @@ import { useLifecycle } from '../../apps/lifecycle';
 import { FitList, useBox } from './size';
 import type { SettingsProps, WidgetProps } from './widgets';
 
-const dataPath = (kind: string) => `/api/v1/home/widgets/${encodeURIComponent(kind)}/data`;
+export const dataPath = (kind: string) => `/api/v1/home/widgets/${encodeURIComponent(kind)}/data`;
 
 /** "2 min ago", for when the figures were read. */
-function since(seconds: number) {
+export function since(seconds: number) {
   const age = Math.max(0, Date.now() / 1000 - seconds);
   if (age < 60) return 'just now';
   if (age < 3600) return `${Math.floor(age / 60)} min ago`;
@@ -54,7 +54,7 @@ function Skeleton() {
 }
 
 /** Why there are no figures, and the one thing that fixes it. */
-function Unavailable({
+export function Unavailable({
   data,
   onRetry,
   onConfigure,
@@ -110,7 +110,7 @@ function Unavailable({
  * Above the last known figures while the app cannot give new ones: why, how old they are, and the
  * fix. Grey for a stopped or starting app, amber when it is running but did not answer.
  */
-function SavedBanner({ data, onRetry, tiny }: { data: HomeWidgetData; onRetry: () => void; tiny: boolean }) {
+export function SavedBanner({ data, onRetry, tiny }: { data: HomeWidgetData; onRetry: () => void; tiny: boolean }) {
   const isAdmin = useIsAdmin();
   const lifecycle = useLifecycle();
   const service = useDashboard().data.services.services.find((item) => item.id === data.app_id);
@@ -244,10 +244,14 @@ export function AppWidget({ widget, kind, onConfigure }: WidgetProps & { kind?: 
         tiny={tiny}
       />
     );
-  const stats = data.stats ?? [];
-  const items = data.items ?? [];
+  // The person may keep only the figures or only the list; a widget with just one part always shows it.
+  const show = showOf(widget);
+  const allStats = data.stats ?? [];
+  const listGiven = (data.items ?? []).length > 0 || Boolean(data.empty);
+  const stats = show === 'list' && listGiven ? [] : allStats;
+  const items = show === 'figures' && allStats.length ? [] : (data.items ?? []);
   const updated = data.updated_at ?? 0;
-  const hasList = items.length > 0 || Boolean(data.empty);
+  const hasList = items.length > 0 || (Boolean(data.empty) && !(show === 'figures' && allStats.length));
   // Short: the figures alone (or the list alone, if there are no figures). Wide: figures beside the
   // list. Otherwise figures above the list. Whatever does not fit whole is left out, never cut.
   const side = measured && width >= 560 && stats.length > 0 && hasList;
@@ -311,6 +315,47 @@ export function AppWidget({ widget, kind, onConfigure }: WidgetProps & { kind?: 
         )}
       </div>
     </div>
+  );
+}
+
+const SHOWS = [
+  ['both', 'Both'],
+  ['figures', 'Figures'],
+  ['list', 'List'],
+] as const;
+type Show = (typeof SHOWS)[number][0];
+
+function showOf(widget: WidgetProps['widget']): Show {
+  const value = (widget.settings as { show?: string }).show;
+  return SHOWS.find(([id]) => id === value)?.[0] ?? 'both';
+}
+
+/** Every app widget's settings: what it shows, then its key when it takes one. */
+export function AppWidgetSettings({ widget, kind, onChange }: SettingsProps & { kind?: HomeWidgetKind }) {
+  const show = showOf(widget);
+  return (
+    <>
+      <div className="widget-setting">
+        <span className="widget-setting-label">Show</span>
+        <div className="segmented" role="radiogroup" aria-label="What the widget shows">
+          {SHOWS.map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={show === id}
+              onClick={() => onChange({ ...widget.settings, show: id })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="muted widget-setting-hint">
+          The headline figures, the list under them, or both. A widget with only one of them always shows it.
+        </p>
+      </div>
+      {kind?.key_label && <KeySettings widget={widget} kind={kind} onChange={onChange} />}
+    </>
   );
 }
 

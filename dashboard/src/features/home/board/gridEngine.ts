@@ -34,4 +34,13 @@ export class SwappingEngine extends GridStackEngine {
     }
     return fixCollisions.call(this, node, nn, collide, opt);
   }
+
+  /**
+   * gridstack remembers each column count's layout so a grid sized back up returns to it. A group's
+   * grid changes columns whenever the group is resized, and its widgets keep their own places and sizes
+   * then (layout 'none'); a remembered layout would put them back where they were before they moved.
+   */
+  cacheLayout(): GridStackEngine {
+    return this;
+  }
 }

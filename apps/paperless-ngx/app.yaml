@@ -16,7 +16,7 @@ widgets:
   refresh_seconds: 600
   largest: [12, 10]
   start: [4, 4]
-version: "v3.4.2"
+version: "v3.5.1"
 upstream: paperless-ngx/paperless-ngx
 data_dir: paperless
 service:

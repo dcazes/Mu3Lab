@@ -1,10 +1,13 @@
-"""Background image downloads for install batches.
+"""Background image downloads for install batches and for the app updates someone asked for.
 
 Runs inside the worker next to the job loop. Each running batch downloads up
 to its ``parallel_downloads`` apps at once, in the owner's order; when an
 app's images are present it becomes ready and the batch sets it up (one setup
 at a time, through the ordinary job queue). Pausing stops a download but
 keeps its finished ranges, so resuming continues where it left off.
+
+Queued app updates download here too, a few at once, before their turn
+(``ctl.update_downloads``); nothing is downloaded for an update nobody asked for.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from typing import Any
 
 import yaml
 
-from ctl import image_fetch
+from ctl import image_fetch, update_downloads
 from ctl.image_downloads import ImageDownloadStore
 from ctl.install_batches import InstallBatchStore
 from ctl.jobs import JobStore
@@ -55,6 +58,13 @@ def service_images(service_id: str) -> list[str]:
         return declared_images(load_registry().get(service_id).compose_path(ROOT) / "docker-compose.yml")
     except (RegistryError, OSError, yaml.YAMLError):
         return []
+
+
+def update_images(service_id: str) -> tuple[str, ...]:
+    """The images an app's approved release runs: what its update downloads."""
+    from ctl.lifecycle.update import target_images
+
+    return target_images(load_registry().get(service_id), ROOT)
 
 
 def progress_key(batch_id: str, ordinal: int) -> str:
@@ -94,6 +104,10 @@ class DownloadManager:
         return cls(batches, jobs, ImageDownloadStore.runtime(), RuntimePaths().runtime / "image-cache", log)
 
     def tick(self) -> None:
+        try:
+            update_downloads.tick(self.jobs, update_images, self.log)
+        except Exception as exc:  # each update downloads its own images when its turn comes
+            self.log(f"Mu3Lab update downloads deferred: {exc}")
         queue = self.batches.download_queue()
         wanted = {(str(item["batch_id"]), int(item["ordinal"])): item for item in queue}
         for key, (thread, stop) in list(self.active.items()):

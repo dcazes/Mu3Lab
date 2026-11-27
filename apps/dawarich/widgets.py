@@ -13,6 +13,8 @@ from ctl.app_widgets import WidgetContext
 
 CONNECTOR = "dawarich-builtin"
 KEY_ENV = "MCP_AUTH_TOKEN"
+# Dawarich only answers HTTPS; Caddy says so for the browser, and Mu3Lab does on the loopback port.
+HTTPS = {"X-Forwarded-Proto": "https"}
 
 
 def _clock(stamp: str) -> str:
@@ -24,8 +26,8 @@ def _clock(stamp: str) -> str:
 
 def places(ctx: WidgetContext) -> dict[str, Any]:
     key = ctx.own_credentials(CONNECTOR).get(KEY_ENV, "")
-    headers = {"Authorization": f"Bearer {key}"}
-    figures = ctx.get("/api/v1/stats", params={"api_key": key}) or {}
+    headers = {"Authorization": f"Bearer {key}"} | HTTPS
+    figures = ctx.get("/api/v1/stats", headers=headers) or {}
     midnight = datetime.combine(datetime.now().date(), time.min).astimezone()
     visits = (
         ctx.get(

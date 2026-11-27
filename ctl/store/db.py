@@ -90,8 +90,14 @@ def connect(path: Path | str, *, timeout: float = 15, readonly: bool = False) ->
         )
     else:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
-        os.close(descriptor)
+        # Create a missing file private from the start. Never open and close an existing one here:
+        # closing any descriptor to it drops every SQLite lock this process holds on it, including
+        # another thread's mid-write, and that corrupts the database.
+        if not path.exists():
+            try:
+                os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600))
+            except FileExistsError:
+                pass
         os.chmod(path, 0o600)
         connection = sqlite3.connect(path, timeout=timeout, factory=ClosingConnection)
     connection.store_path = key

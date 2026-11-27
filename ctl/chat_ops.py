@@ -9,7 +9,9 @@ its backend: ``ctl.openwebui_ops``, ``ctl.lobehub_ops`` or ``ctl.librechat_ops``
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from types import ModuleType
 from typing import Any
 from urllib.parse import quote
@@ -314,8 +316,35 @@ def _personal_servers(app_id: str, connector_id: str) -> list[tuple[str, str, st
     return found
 
 
+_deferring = threading.local()
+_pending = threading.Event()
+
+
+@contextmanager
+def deferred_sync() -> Iterator[None]:
+    """Within this block (on this thread), ``sync_agents`` only notes that chat needs bringing in step.
+
+    App updates run inside it: every app's stop and start would otherwise sync every chat app,
+    twice per app. The worker syncs once when no update is left (``sync_pending``).
+    """
+    _deferring.depth = getattr(_deferring, "depth", 0) + 1
+    try:
+        yield
+    finally:
+        _deferring.depth -= 1
+
+
+def sync_pending() -> bool:
+    """Whether a deferred sync is still owed."""
+    return _pending.is_set()
+
+
 def sync_agents(log: Log) -> tuple[bool, str]:
     """Keep every installed chat app's assistants in step; the household one decides the answer."""
+    if getattr(_deferring, "depth", 0):
+        _pending.set()
+        return True, "Chat assistants are brought in step once the updates finish."
+    _pending.clear()
     from ctl import calendar_tools
 
     calendar_tools.sync(log)

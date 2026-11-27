@@ -1,4 +1,13 @@
-import { Check, ChevronDown, MessageCircle, MessageCircleOff, Play, RefreshCw, Square } from 'lucide-react';
+import {
+  Check,
+  CheckSquare,
+  ChevronDown,
+  MessageCircle,
+  MessageCircleOff,
+  Play,
+  RefreshCw,
+  Square,
+} from 'lucide-react';
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import type { ChatAssistant, Service } from '../../api';
 import { AppIcon } from '../../components/AppIcon';
@@ -119,8 +128,31 @@ function LauncherTile(props: TileProps) {
   );
 }
 
+/** One installed app as a row in select mode: the whole row picks it. */
+function PickRow({ service, selected, onToggle }: { service: Service; selected: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      className={`row row-button pick-row${selected ? ' is-selected' : ''}`}
+      aria-label={`${service.name}: ${statusText(service)}`}
+      aria-pressed={selected}
+      disabled={!pickable(service)}
+      onClick={onToggle}
+    >
+      <span className="pick-box" aria-hidden="true">
+        {selected && <Check />}
+      </span>
+      <AppIcon id={service.id} />
+      <span className="row-text">
+        <b>{service.name}</b>
+        <small>{statusText(service)}</small>
+      </span>
+    </button>
+  );
+}
+
 /** Select mode: pick apps, then start, stop or restart them together. */
-function useSelection(services: Service[]) {
+export function useAppSelection(services: Service[]) {
   const [selecting, setSelecting] = useState(false);
   const [stored, setStored] = useState<string[]>([]);
   // An app that started working on something meanwhile drops out.
@@ -140,6 +172,25 @@ function useSelection(services: Service[]) {
     return () => window.removeEventListener('keydown', onKey);
   }, [selecting]);
   return { selecting, start: () => setSelecting(true), finish, picked, toggle, setMany };
+}
+
+export type AppSelection = ReturnType<typeof useAppSelection>;
+
+/** Turns select mode on and off; only administrators, and only when some app can be picked. */
+export function SelectToggle({ selection, services }: { selection: AppSelection; services: Service[] }) {
+  const isAdmin = useIsAdmin();
+  if (!isAdmin || !(selection.selecting || services.some(pickable))) return null;
+  return (
+    <Button
+      size="sm"
+      variant={selection.selecting ? 'primary' : 'secondary'}
+      icon={selection.selecting ? Check : CheckSquare}
+      aria-pressed={selection.selecting}
+      onClick={selection.selecting ? selection.finish : selection.start}
+    >
+      {selection.selecting ? 'Done' : 'Select'}
+    </Button>
+  );
 }
 
 function SelectionBar({ picked, onDone }: { picked: Service[]; onDone: () => void }) {
@@ -237,15 +288,19 @@ function SectionAction({ section }: { section: LauncherSection }) {
  * A folded section is its heading alone: the name and how many of its apps are running.
  *
  * ``listRow``: show each section's apps as rows instead of tiles.
+ * ``selection``: select mode kept by the page, which shows its own Select button (``SelectToggle``);
+ * without it the stacks keep their own and show the button in a title row.
  */
 export function AppStacks({
   services,
   title,
   listRow,
+  selection: shared,
 }: {
   services: Service[];
   title?: string;
   listRow?: (service: Service) => ReactNode;
+  selection?: AppSelection;
 }) {
   const { data } = useDashboard();
   const all = data.services.services;
@@ -255,7 +310,8 @@ export function AppStacks({
   const { width } = useSectionWidth();
   const [panel, setPanel] = useState('');
   const isAdmin = useIsAdmin();
-  const selection = useSelection(services);
+  const own = useAppSelection(services);
+  const selection = shared || own;
   const open = (id: string) =>
     selection.selecting ? selection.toggle(id) : setPanel((current) => (current === id ? '' : id));
   // Look the app up each render so the card follows its live state.
@@ -266,28 +322,21 @@ export function AppStacks({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [panel]);
+  // Picking replaces the details card, so close it when select mode starts.
+  const [wasSelecting, setWasSelecting] = useState(selection.selecting);
+  if (wasSelecting !== selection.selecting) {
+    setWasSelecting(selection.selecting);
+    if (selection.selecting) setPanel('');
+  }
   const showCard = !listRow && !selection.selecting;
   return (
     <>
-      <div className="section-title">
-        {title ? <h2 id="apps-heading">{title}</h2> : <span />}
-        {isAdmin && services.some(pickable) && (
-          <span className="section-title-actions">
-            <button
-              type="button"
-              className="link-button"
-              aria-pressed={selection.selecting}
-              onClick={() => {
-                setPanel('');
-                if (selection.selecting) selection.finish();
-                else selection.start();
-              }}
-            >
-              {selection.selecting ? 'Done' : 'Select'}
-            </button>
-          </span>
-        )}
-      </div>
+      {(title || !shared) && (
+        <div className="section-title">
+          {title ? <h2 id="apps-heading">{title}</h2> : <span />}
+          {!shared && <SelectToggle selection={selection} services={services} />}
+        </div>
+      )}
       <div className={`stacks-layout${showCard ? ' has-card' : ''}${selected && showCard ? ' has-pick' : ''}`}>
         <div className={`launcher-groups${selection.selecting ? ' is-selecting' : ''}${listRow ? ' is-list' : ''}`}>
           {sections.map((section) => {
@@ -336,7 +385,20 @@ export function AppStacks({
                     : isAdmin && <SectionAction section={section} />}
                 </h3>
                 {unfolded && listRow ? (
-                  <div className="card card-flush rows">{apps.map((service) => listRow(service))}</div>
+                  <div className="card card-flush rows">
+                    {apps.map((service) =>
+                      selection.selecting ? (
+                        <PickRow
+                          key={service.id}
+                          service={service}
+                          selected={selection.picked.some((item) => item.id === service.id)}
+                          onToggle={() => selection.toggle(service.id)}
+                        />
+                      ) : (
+                        listRow(service)
+                      ),
+                    )}
+                  </div>
                 ) : unfolded ? (
                   <div className="launcher">
                     {apps.map((service) => (

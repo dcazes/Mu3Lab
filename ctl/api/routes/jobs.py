@@ -15,6 +15,7 @@ from ctl.core_setup import app_progress, start_verify
 from ctl.core_setup import start as start_core_setup
 from ctl.image_downloads import ImageDownloadStore
 from ctl.jobs import JobStore
+from ctl.lifecycle import update
 from ctl.provisioning import ProvisioningStore
 from ctl.registry import RegistryError
 from ctl.registry import load as load_registry
@@ -96,16 +97,45 @@ def retry_job(job_id: str, request: Request, operator: OperatorMutation) -> mode
     return models.JobResponse.model_validate({"ok": True, "job": job})
 
 
-@router.post("/jobs/{job_id}/cancel", response_model=models.JobResponse, response_model_exclude_none=True)
-def cancel_job(job_id: str, operator: OperatorMutation) -> models.JobResponse:
+@router.post("/jobs/{job_id}/cancel", response_model=models.JobCancelResponse, response_model_exclude_none=True)
+def cancel_job(job_id: str, operator: OperatorMutation) -> models.JobCancelResponse:
     store = runtime.job_store()
+    job = store.get(job_id)
+    if not job:
+        raise ApiError(404, "job not found")
+    if job.get("action") == "update" and not update.cancellable(store, job):
+        raise ApiError(
+            409,
+            "This update is already switching versions; it finishes, or puts the old version back by itself.",
+        )
     try:
         state = store.cancel(job_id, actor=operator["username"])
     except KeyError as exc:
         raise ApiError(404, "job not found") from exc
     except ValueError as exc:
         raise ApiError(409, str(exc)) from exc
-    return models.JobResponse.model_validate({"ok": True, "state": state})
+    return models.JobCancelResponse.model_validate({"ok": True, "state": state})
+
+
+@router.post("/service-updates/cancel", response_model=models.UpdatesCancelResponse, response_model_exclude_none=True)
+def cancel_updates(operator: OperatorMutation) -> models.UpdatesCancelResponse:
+    """Stop every app update that is still waiting or downloading; those switching versions finish."""
+    store = runtime.job_store()
+    cancelled: list[str] = []
+    finishing: list[str] = []
+    for job in store.active_jobs():
+        if job.get("action") != "update" or job.get("state") not in ACTIVE:
+            continue
+        service_id = str(job.get("service_id") or "")
+        if not update.cancellable(store, job):
+            finishing.append(service_id)
+            continue
+        try:
+            store.cancel(str(job["id"]), actor=operator["username"])
+        except (KeyError, ValueError):
+            continue  # it finished meanwhile
+        cancelled.append(service_id)
+    return models.UpdatesCancelResponse.model_validate({"ok": True, "cancelled": cancelled, "finishing": finishing})
 
 
 def _active_core_job(store: JobStore) -> dict[str, JsonValue] | None:

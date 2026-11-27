@@ -1,7 +1,7 @@
-import { ArrowUpCircle } from 'lucide-react';
+import { ArrowUpCircle, X } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { postJsonApi, type Service } from '../../api';
+import { postJsonApi, type Service, type UpdatesCancelResponse } from '../../api';
 import { Button } from '../../components/Button';
 import { useConfirm } from '../../components/Dialog';
 import { errorText } from '../../lib/format';
@@ -27,10 +27,55 @@ function change(service: Service) {
   return `${update.installed_version || 'current'} → ${update.approved_version}`;
 }
 
+/** An app whose update is waiting or under way. */
+const updating = (service: Service) => {
+  const job = service.last_job;
+  return Boolean(job && job.action === 'update' && ['queued', 'running'].includes(job.state));
+};
+
+/** Stop every update still waiting or downloading; one already switching versions finishes. */
+function CancelUpdates({ count }: { count: number }) {
+  const { refresh } = useDashboard();
+  const confirm = useConfirm();
+  const [pending, setPending] = useState(false);
+
+  const run = async () => {
+    const confirmed = await confirm({
+      title: count === 1 ? 'Cancel the update?' : `Cancel ${count} updates?`,
+      description:
+        'Updates still waiting or downloading stop, and those apps stay exactly as they are. An app already ' +
+        'switching versions finishes first, or puts its old version back by itself.',
+      confirmLabel: count === 1 ? 'Cancel update' : 'Cancel updates',
+    });
+    if (!confirmed) return;
+    setPending(true);
+    try {
+      const result = await postJsonApi<UpdatesCancelResponse>('/api/v1/service-updates/cancel', {});
+      const stopped = result.cancelled.length;
+      const left = result.finishing.length;
+      if (stopped) toast.success(`Cancelled ${stopped} ${stopped === 1 ? 'update' : 'updates'}; nothing changed.`);
+      if (left) toast.info(`${left} ${left === 1 ? 'app is' : 'apps are'} already switching versions and will finish.`);
+      if (!stopped && !left) toast.info('No update was waiting.');
+    } catch (cause) {
+      toast.error(errorText(cause));
+    } finally {
+      setPending(false);
+      void refresh();
+    }
+  };
+
+  return (
+    <Button size="sm" variant="ghost" icon={X} loading={pending} onClick={() => void run()}>
+      Cancel updates ({count})
+    </Button>
+  );
+}
+
 /**
  * Update every app with an approved update, from the Apps page. Each app's update is its own job,
  * exactly as its own Update button makes: a backup first, and the old version put back by itself if
- * the new one does not start. The worker runs them one after another.
+ * the new one does not start. The worker downloads a few at once before their turn, and updates
+ * apps that have nothing to do with each other side by side.
  */
 export function UpdateAll() {
   const isAdmin = useIsAdmin();
@@ -38,7 +83,9 @@ export function UpdateAll() {
   const confirm = useConfirm();
   const [pending, setPending] = useState(false);
   const updatable = data.services.services.filter(canUpdate);
-  if (!isAdmin || !updatable.length) return null;
+  const underWay = data.services.services.filter(updating).length;
+  if (!isAdmin) return null;
+  if (!updatable.length) return underWay ? <CancelUpdates count={underWay} /> : null;
   const apps = updatable.length === 1 ? '1 app' : `${updatable.length} apps`;
 
   const run = async () => {
@@ -64,9 +111,11 @@ export function UpdateAll() {
               </span>
             ))}
           </span>
-          Mu3Lab updates them one at a time. Each one has its data backed up, then starts on the new version; if it
-          doesn’t start properly, Mu3Lab puts back the backup and the version from before. A running app is unavailable
-          for a few minutes during its turn; a stopped one is started only to check it, then stopped again.
+          Mu3Lab first downloads the new versions, a few at once, while the apps keep running. Then apps that don’t
+          depend on each other update side by side. Each one has its data backed up, then starts on the new version; if
+          it doesn’t start properly, Mu3Lab puts back the backup and the version from before. A running app is
+          unavailable for a minute or two during its turn; a stopped one is started only to check it, then stopped
+          again. You can cancel any update that is still waiting or downloading.
           {warnings.length > 0 && <span className="update-all-warnings">{warnings.join(' ')}</span>}
         </>
       ),
@@ -87,14 +136,17 @@ export function UpdateAll() {
       setPending(false);
     }
     const queued = updatable.length - failed.length;
-    if (queued) toast.success(`Updating ${queued} ${queued === 1 ? 'app' : 'apps'}, one at a time.`);
+    if (queued) toast.success(`Updating ${queued} ${queued === 1 ? 'app' : 'apps'}.`);
     if (failed.length) toast.error(`Not started: ${failed.join('; ')}`);
     void refresh();
   };
 
   return (
-    <Button size="sm" icon={ArrowUpCircle} loading={pending} onClick={() => void run()}>
-      Update all ({updatable.length})
-    </Button>
+    <>
+      {underWay > 0 && <CancelUpdates count={underWay} />}
+      <Button size="sm" icon={ArrowUpCircle} loading={pending} onClick={() => void run()}>
+        Update all ({updatable.length})
+      </Button>
+    </>
   );
 }

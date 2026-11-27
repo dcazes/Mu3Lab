@@ -131,7 +131,7 @@ def public_address(text: str) -> str:
     except (OSError, UnicodeError):
         raise SearchError(f"{host} could not be found.") from None
     for address in found:
-        if not ipaddress.ip_address(address.split("%")[0]).is_global:
+        if not ipaddress.ip_address(str(address).split("%")[0]).is_global:
             raise SearchError("Only public web pages can be read here, not this server's or the home network's.")
     return url
 
@@ -189,7 +189,7 @@ def read_page(text: str) -> dict[str, Any]:
 def deep(query: str) -> dict[str, Any]:
     results = _results(_searxng(query))
 
-    def opening(result: dict[str, str]) -> dict[str, str]:
+    def opening(result: dict[str, str]) -> dict[str, Any]:
         try:
             page = _scrape(public_address(result["url"]))
         except SearchError:

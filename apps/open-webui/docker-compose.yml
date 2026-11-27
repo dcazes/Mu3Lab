@@ -2,7 +2,7 @@ name: mu3lab-open-webui
 
 services:
   open-webui:
-    image: ghcr.io/open-webui/open-webui:v0.13.0@sha256:2272b0fb7c8783a016bcc179abb467cfa34590c99c5e6560fe0e9155b4820a09
+    image: ghcr.io/open-webui/open-webui:v0.13.5@sha256:e0dc5a8bf5c71cadf339d1e7b9408b357da75fb2854f82cad57a1609fadf2a22
     extra_hosts: ["${MU3LAB_TAILNET_HOST:-tailnet.invalid}:host-gateway"]
     restart: unless-stopped
     ports: ["127.0.0.1:3212:8080"]

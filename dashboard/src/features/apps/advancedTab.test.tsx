@@ -147,9 +147,43 @@ describe('AdvancedTab updates', () => {
     await vi.waitFor(() => expect(posts).toEqual([{ action: 'update' }]));
   });
 
-  it('says when the app is on the latest tested version', async () => {
+  it('says when the app is on the latest version Mu3Lab can offer', async () => {
     setup(release({ update_available: false, update_enabled: false, approved_version: 'v3.22.0' }));
-    expect(await screen.findByText('You’re on the latest tested version (v3.22.0).')).toBeInTheDocument();
+    expect(await screen.findByText('You’re on the latest version Mu3Lab can offer (v3.22.0).')).toBeInTheDocument();
+  });
+
+  it('offers a newer release from the app’s makers that passed the checks', async () => {
+    const posts = setup(release({ approved_version: 'v3.23.0', source: 'upstream' }));
+    expect(
+      await screen.findByText(
+        'A newer release from Mealie’s makers is ready: v3.23.0. It passed Mu3Lab’s automatic checks.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Update to v3.23.0' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Update Mealie to v3.23.0?' });
+    expect(within(dialog).getByText(/comes straight from Mealie’s makers/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Update' }));
+    await vi.waitFor(() => expect(posts).toEqual([{ action: 'update' }]));
+  });
+
+  it('says why a newer release waits for review', async () => {
+    setup(
+      release({
+        update_available: false,
+        update_enabled: false,
+        approved_version: 'v3.22.0',
+        upstream: {
+          version: 'v4.0.0',
+          state: 'held',
+          reasons: ['v4.0.0 is a new major version, which often needs changes; Mu3Lab reviews those first.'],
+          checked_at: new Date().toISOString(),
+          release_url: 'https://github.com/mealie-recipes/mealie/releases/tag/v4.0.0',
+        },
+      }),
+    );
+    expect(await screen.findByText('Mealie v4.0.0 is out, but waits for Mu3Lab’s review because:')).toBeInTheDocument();
+    expect(screen.getByText(/is a new major version/)).toBeInTheDocument();
+    expect(screen.getByText('Checked for newer releases just now.')).toBeInTheDocument();
   });
 });
 

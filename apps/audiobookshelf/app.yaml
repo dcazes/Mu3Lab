@@ -15,7 +15,7 @@ widgets:
   refresh_seconds: 1800
   largest: [12, 8]
   start: [4, 3]
-version: "v2.37.2"
+version: "v2.38.0"
 upstream: advplyr/audiobookshelf
 media:
 - name: audiobooks

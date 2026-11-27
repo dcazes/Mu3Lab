@@ -13,14 +13,27 @@ from ctl.app_widgets import WidgetContext, WidgetError
 KEY_ENV = "HOMEBOX_MU3LAB_KEY"
 
 
+def _things(entity: dict[str, Any]) -> int:
+    """Things kept in a place, its smaller places included (a shelf in the garage)."""
+    return sum(
+        _things(child) if child.get("type") == "location" else 1 + _things(child)
+        for child in entity.get("children") or []
+    )
+
+
 def inventory(ctx: WidgetContext) -> dict[str, Any]:
     key = ctx.env().get(KEY_ENV, "")
     if not key:
         raise WidgetError("Mu3Lab's HomeBox key is missing; reinstall HomeBox from its page in Apps.")
     headers = {"Authorization": f"Bearer {key}"}
     figures = ctx.get("/api/v1/groups/statistics", headers=headers) or {}
-    places = ctx.get("/api/v1/locations", params={"filterChildren": "false"}, headers=headers) or []
-    places = sorted(places, key=lambda place: int(place.get("itemCount") or 0), reverse=True)
+    # HomeBox 0.27 keeps places and things as one tree of "entities" (``/api/v1/locations`` is gone).
+    tree = ctx.get("/api/v1/entities/tree", params={"withItems": "true"}, headers=headers) or []
+    places = sorted(
+        ({"id": place.get("id"), "name": place.get("name"), "itemCount": _things(place)} for place in tree),
+        key=lambda place: place["itemCount"],
+        reverse=True,
+    )
     worth = float(figures.get("totalItemPrice") or 0)
     return {
         "stats": [

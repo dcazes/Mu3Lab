@@ -2,8 +2,10 @@ import { ArrowRight, Check, LayoutGrid, Pencil, Plus, Redo2, Undo2, X } from 'lu
 import { useEffect, useState } from 'react';
 import { Button } from '../../components/Button';
 import { Link } from '../../lib/router';
+import { jobQueue, JobQueueNotice } from '../apps/JobQueue';
 import { useDashboard } from '../../state/dashboard';
 import { BoardView, type Panel, usePanelRoom } from './board/Board';
+import { BoardTabs } from './board/BoardTabs';
 import { type Board, useBoard } from './board/useBoard';
 import { CoreSetupProgress } from './CoreSetupProgress';
 import { GetStarted } from './GetStarted';
@@ -16,15 +18,15 @@ function greeting() {
 }
 
 function Attention() {
-  const { notices, progress, dismiss } = useHomeNotices();
-  const items = [...notices, ...progress];
-  if (!items.length) return null;
+  const { notices, working, dismiss } = useHomeNotices();
+  const queue = jobQueue(working);
+  if (!notices.length && !queue.now.length && !queue.waiting.length) return null;
   return (
     <section className="attention" aria-label="Needs attention">
-      {items.map(({ key, warnings, icon: Icon, tone, text, more, to }) => (
+      {notices.map(({ key, warnings, icon: Icon, tone, text, more, to }) => (
         <div key={key} className="attention-row">
           <Link to={to} className={`attention-item attention-${tone}`}>
-            <Icon className={tone === 'progress' ? 'spin' : ''} />
+            <Icon />
             <span>
               {text}
               {more > 0 && <small className="attention-more"> +{more} more</small>}
@@ -44,6 +46,7 @@ function Attention() {
           )}
         </div>
       ))}
+      <JobQueueNotice services={working} />
     </section>
   );
 }
@@ -163,14 +166,11 @@ function EditBar({
   );
 }
 
-// On a computer the add list opens beside the board; on a phone it would cover it, so it waits to be asked for.
-const wide = () => typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 1001px)').matches;
-
 export function HomePage() {
   const { data } = useDashboard();
   const board = useBoard();
   const [panel, setPanel] = useState<Panel>('closed');
-  const { home, shift, covered, reserve } = usePanelRoom(board.editing && panel !== 'closed');
+  const { home, covered } = usePanelRoom(board.editing && panel === 'add');
   const cancel = () => {
     board.cancel();
     setPanel('closed');
@@ -178,11 +178,7 @@ export function HomePage() {
   const done = () => void board.save().then((saved) => saved && setPanel('closed'));
   const name = (data.identity.display_name || data.identity.username || '').split(' ')[0];
   return (
-    <div
-      className="home"
-      ref={home}
-      style={shift ? { transform: `translateX(-${shift}px)` } : reserve ? { paddingRight: reserve } : undefined}
-    >
+    <div className="home" ref={home}>
       <header className="home-header">
         <div>
           <h1>
@@ -200,8 +196,9 @@ export function HomePage() {
               icon={Pencil}
               disabled={!board.loaded}
               onClick={() => {
+                // Edit only arranges the board; Add widget opens the list.
                 board.startEditing();
-                setPanel(wide() ? 'add' : 'closed');
+                setPanel('closed');
               }}
             >
               Edit
@@ -213,6 +210,7 @@ export function HomePage() {
       <Attention />
       <CoreSetupProgress />
       <GetStarted />
+      <BoardTabs board={board} />
       <section aria-label="Your board">
         <BoardView board={board} panel={panel} setPanel={setPanel} finish={covered ? { cancel, done } : undefined} />
       </section>

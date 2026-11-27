@@ -19,7 +19,7 @@ widgets:
   refresh_seconds: 120
   largest: [12, 10]
   start: [4, 4]
-version: "v1.1.0"
+version: "v1.1.2"
 upstream: IBM/mcp-context-forge
 service:
   local_port: 4444

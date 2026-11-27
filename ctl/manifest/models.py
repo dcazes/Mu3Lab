@@ -432,6 +432,9 @@ class HomeWidgetSpec(Model):
     smallest: tuple[int, int] = (2, 2)
     largest: tuple[int, int] = (12, 8)
     start: tuple[int, int] = (4, 3)
+    # How the dashboard draws it: figures and a list (the usual), or a view of its own, whose data
+    # the reader returns under ``view`` (ctl/app_widgets.py).
+    view: Literal["figures", "notes", "slideshow"] = "figures"
 
 
 class Chat(Model):
@@ -663,6 +666,10 @@ class AppManifest(Model):
     summary: str
     version: str  # the maintainer-approved release; image digests live in docker-compose.yml
     upstream: str  # GitHub owner/repo for release notes
+    # Image tags that do not simply hold the release number, by Compose service, for newer releases
+    # each server finds itself (ctl/lifecycle/upstream.py): "{version}" is the number, "*" a build
+    # counter whose highest value wins, e.g. LinuxServer's "{version}-ls*".
+    upstream_tags: dict[str, str] = Field(default_factory=dict)
     capabilities: tuple[str, ...] = ()
     # A helper for one Home widget (e.g. "camera"): not listed in Apps or Discover. The widget's
     # setup installs it, and Mu3Lab starts it while the widget is in use and stops it after.

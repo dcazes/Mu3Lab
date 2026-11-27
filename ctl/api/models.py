@@ -116,9 +116,14 @@ class HomeWidget(ApiModel):
     h: int
     # Left out of the one-column board a phone shows.
     hide_on_phone: bool = False
-    # Each kind's own settings (ctl/home_board.py checks them): weather {units, place}, stocks
-    # {symbols}, calendar {days}.
+    # The person's own name for the widget ("" = its kind's name), and no title bar outside edit mode.
+    title: str = ""
+    hide_title: bool = False
+    # Each kind's own settings (ctl/home_board.py checks them): weather {units, days, place}, stocks
+    # {symbols, range}, calendar {view, week_start}, an app's {show}, a group's {title, collapsed}.
     settings: dict[str, JsonValue] = {}
+    # A group's widgets, placed on its own grid (columns and rows from the group's top-left).
+    children: list[HomeWidget] = []
 
 
 class HomeWidgetKind(ApiModel):
@@ -140,6 +145,8 @@ class HomeWidgetKind(ApiModel):
     # A key the person pastes in the widget's settings, when Mu3Lab cannot make one.
     key_label: str | None = None
     key_help: str | None = None
+    # How the dashboard draws an app's widget: figures and a list, or a view of its own.
+    view: str = "figures"
 
 
 class HomeWidgetStat(ApiModel):
@@ -162,6 +169,15 @@ class HomeWidgetItem(ApiModel):
 
 class HomeWidgetAction(ApiModel):
     action: str = Field(min_length=1, max_length=120)
+    # A view's change (the note's text) and that widget's settings on the board (which document).
+    data: dict[str, JsonValue] = {}
+    settings: dict[str, JsonValue] = {}
+
+
+class HomeWidgetActionResult(ApiModel):
+    ok: bool = True
+    # What the app answered, for a view (a new document's id).
+    result: dict[str, JsonValue] = {}
 
 
 class HomeWidgetKeyRequest(ApiModel):
@@ -192,6 +208,14 @@ class HomeWidgetData(ApiModel):
     items_title: str = ""
     empty: str = ""
     note: str = ""
+    # A view's own data (manifest ``view``): a note's text, a slideshow's photos.
+    view: dict[str, JsonValue] = {}
+
+
+class HomeBoardTab(ApiModel):
+    # Empty in a request: a new board.
+    id: str = Field(default="", max_length=40)
+    name: str = Field(max_length=60)
 
 
 class HomeBoard(ApiModel):
@@ -206,12 +230,28 @@ class HomeBoard(ApiModel):
     # free: widgets stay where they are put (gaps allowed); gravity: they pack to the top.
     placement: Literal["free", "gravity"]
     kinds: list[HomeWidgetKind]
+    # Which of the person's boards this is, and all of them (tabs), in their order.
+    tab: str = "home"
+    tabs: list[HomeBoardTab] = []
 
 
 class HomeBoardRequest(ApiModel):
     widgets: list[dict[str, JsonValue]]
     columns: int = 12
     placement: Literal["free", "gravity"] = "free"
+    # The board (tab) saved; empty = the first.
+    tab: str = Field(default="", max_length=40)
+
+
+class HomeBoardTabsRequest(ApiModel):
+    """Every board the person keeps, in order: renamed, moved, new (no id) or left out (removed)."""
+
+    tabs: list[HomeBoardTab] = Field(min_length=1, max_length=12)
+
+
+class HomeBoardTabs(ApiModel):
+    ok: bool = True
+    tabs: list[HomeBoardTab]
 
 
 class WeatherDay(ApiModel):
@@ -261,6 +301,48 @@ class StockQuote(ApiModel):
 class StocksResponse(ApiModel):
     ok: bool = True
     quotes: list[StockQuote]
+
+
+class Mover(ApiModel):
+    symbol: str
+    name: str = ""
+    price: float | None = None
+    change_percent: float | None = None
+    currency: str = ""
+
+
+class MoversResponse(ApiModel):
+    ok: bool = True
+    movers: list[Mover]
+
+
+class RatesResponse(ApiModel):
+    ok: bool = True
+    base: str
+    # The day the European Central Bank published them.
+    date: str
+    rates: dict[str, float]
+
+
+class FeedItem(ApiModel):
+    title: str
+    url: str
+    summary: str = ""
+    # Seconds since 1970; 0 when the feed does not say.
+    published: float = 0
+
+
+class Feed(ApiModel):
+    url: str
+    title: str = ""
+    items: list[FeedItem] = []
+    # Why this feed shows nothing ("" when it was read).
+    error: str = ""
+
+
+class FeedsResponse(ApiModel):
+    ok: bool = True
+    feeds: list[Feed]
 
 
 class ThermostatStatus(ApiModel):
@@ -436,11 +518,25 @@ class ServiceRecovery(ApiModel):
 class ServiceUpdate(ApiModel):
     repository: str
     installed_version: str
+    # The release an update moves to (Mu3Lab's, or a newer one from the app's makers: ``source``).
     approved_version: str
     update_available: bool
     supporting_only: bool
     # Same release and images; Mu3Lab changed the app's own files since they were installed.
     files_only: bool = False
+    # "mu3lab": the release Mu3Lab approves. "upstream": newer, from the app's makers, passed the checks here.
+    source: Literal["mu3lab", "upstream"] = "mu3lab"
+
+
+class UpstreamRelease(ApiModel):
+    """The newest release this server found from the app's makers, and what Mu3Lab's checks made of it."""
+
+    version: str
+    # ready: offered. held: waits for Mu3Lab's review (reasons). current: nothing newer. unavailable: unreadable.
+    state: str
+    reasons: list[str] = Field(default_factory=list)
+    checked_at: str
+    release_url: str
 
 
 class ServiceAccount(ApiModel):
@@ -995,6 +1091,8 @@ class Job(ApiModel):
     detail: str
     step_id: str | None = None
     error_code: str | None = None
+    # A queued job's turn among all waiting jobs (1 is next); none once it runs.
+    queue_position: int | None = None
 
 
 class JobsResponse(ApiModel):
@@ -1542,6 +1640,8 @@ class UpdateResponse(ApiModel):
     blocked_reason: str
     added_services: list[str] = Field(default_factory=list)
     removed_services: list[str] = Field(default_factory=list)
+    source: Literal["mu3lab", "upstream"] = "mu3lab"
+    upstream: UpstreamRelease | None = None
 
 
 class McpServerAuth(ApiModel):
@@ -1875,6 +1975,20 @@ class JobResponse(ApiModel):
     ok: bool
     job: QueuedJob
     duplicate: bool | None = None
+
+
+class JobCancelResponse(ApiModel):
+    ok: bool
+    # "cancelled", or "cancelling" while the worker finishes the command it is in.
+    state: Literal["cancelled", "cancelling"]
+
+
+class UpdatesCancelResponse(ApiModel):
+    ok: bool
+    # Apps whose waiting or downloading update stopped; nothing about them changed.
+    cancelled: list[str]
+    # Apps already switching versions: each finishes, or puts its old version back by itself.
+    finishing: list[str]
 
 
 class SessionResponse(ApiModel):

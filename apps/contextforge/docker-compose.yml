@@ -2,7 +2,7 @@ name: mu3lab-contextforge
 
 services:
   contextforge:
-    image: ghcr.io/ibm/mcp-context-forge:v1.1.0@sha256:7eb21fb9a8070df59435c03c76c40d8c71230c55ba89f884f2482d2cc81cff1c
+    image: ghcr.io/ibm/mcp-context-forge:v1.1.2@sha256:63eaf2348f4008ba5427dd2e52da7321dcfb4f89b97ddbfef111deb8f6e41ef2
     # Containers resolve this server's private name to the tailnet relay (Authentik's sign-in keys),
     # and host.docker.internal to this computer, where Kopia's read-only chat connector listens.
     extra_hosts:

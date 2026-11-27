@@ -13,6 +13,7 @@ Readings are kept a few seconds so many open screens ask the thermostat once.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -30,6 +31,7 @@ CODE_DIGITS = 8
 MODES = ("off", "heat", "cool", "auto")
 STATES = ("idle", "heating", "cooling")
 
+_log = logging.getLogger(__name__)
 _lock = asyncio.Lock()
 _reading: tuple[float, dict[str, Any]] | None = None
 
@@ -43,6 +45,21 @@ def paired(store: SecretStore | None = None) -> dict[str, Any] | None:
     return saved if isinstance(saved, dict) and saved.get("pairing") else None
 
 
+def _remember_address(pairing: Any, saved: dict[str, Any], store: SecretStore | None = None) -> None:
+    """Keep the address the thermostat answered on, so the next connection dials it first."""
+    connection = getattr(pairing, "connection", None)
+    hosts = list(getattr(connection, "hosts", None) or [])
+    port = getattr(connection, "port", None)
+    data = dict(saved["pairing"])
+    if not hosts or not port or (data.get("AccessoryIP"), data.get("AccessoryPort")) == (hosts[0], port):
+        return
+    data.update({"AccessoryIP": hosts[0], "AccessoryPort": port})
+    try:
+        (store or SecretStore()).put(SCOPE, NAME, {**saved, "pairing": data})
+    except Exception:  # only a head start for next time
+        _log.warning("Could not save the thermostat's new address", exc_info=True)
+
+
 @asynccontextmanager
 async def _controller() -> AsyncIterator[Any]:
     """A HomeKit controller listening for devices on the home network, for one operation."""
@@ -50,10 +67,14 @@ async def _controller() -> AsyncIterator[Any]:
         from aiohomekit import Controller
         from aiohomekit.characteristic_cache import CharacteristicCacheMemory
         from aiohomekit.zeroconf import ZeroconfServiceListener
+        from zeroconf import IPVersion
         from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
     except ImportError:
         raise ThermostatError("HomeKit support is not installed yet; run the installer again.") from None
-    zeroconf = AsyncZeroconf()
+    # IPv4 and IPv6: an ecobee announces itself only over IPv6, and its home-network address changes
+    # whenever the router hands out a new one. Listening on IPv4 alone, the stale address from pairing
+    # is all there is to dial.
+    zeroconf = AsyncZeroconf(ip_version=IPVersion.All)
     controller = Controller(async_zeroconf_instance=zeroconf, char_cache=CharacteristicCacheMemory())
     async with zeroconf:
         browser = AsyncServiceBrowser(
@@ -227,11 +248,13 @@ async def _read(saved: dict[str, Any]) -> dict[str, Any]:
             pairing = controller.load_pairing(ALIAS, saved["pairing"])
             try:
                 data = await asyncio.wait_for(pairing.list_accessories_and_characteristics(), timeout=15)
+                _remember_address(pairing, saved)
             finally:
                 await pairing.close()
     except ThermostatError:
         raise
     except Exception:
+        _log.warning("Reading the thermostat failed", exc_info=True)
         raise ThermostatError(
             "The thermostat did not answer. Check it is on the home Wi-Fi; if it was reset, pair it again in "
             "Settings > Home devices."
@@ -286,11 +309,13 @@ async def change(
                         if failed:
                             raise ThermostatError("The thermostat did not accept that change.")
                     data = await asyncio.wait_for(pairing.list_accessories_and_characteristics(), timeout=15)
+                    _remember_address(pairing, saved, store)
                 finally:
                     await pairing.close()
         except ThermostatError:
             raise
         except Exception:
+            _log.warning("Changing the thermostat failed", exc_info=True)
             raise ThermostatError("The thermostat did not answer. Check it is on the home Wi-Fi.") from None
         global _reading
         reading = _describe(_thermostat_service(data), str(saved.get("name") or "Thermostat"))

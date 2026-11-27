@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from typing import Annotated
+
 from fastapi import APIRouter, Query
+from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
 from ctl import app_widgets, chat_ops, chat_recent, home_board, home_search, home_widgets, thermostat
@@ -11,11 +15,14 @@ from ctl.api.contracts import ContractRoute
 from ctl.api.errors import ApiError
 from ctl.api.security import IdentityData, Member, MemberMutation, Operator, OperatorMutation, Owner, OwnerMutation
 
+# No feeds asked for (a shared, never-changed default for the query list).
+FEEDS_NONE: list[str] = []
+
 router = APIRouter(prefix="/api/v1/home", tags=["home"], route_class=ContractRoute)
 
 
-def _board(uid: str, is_admin: bool) -> models.HomeBoard:
-    board = home_board.load(uid, is_admin=is_admin)
+def _board(uid: str, is_admin: bool, tab: str = "") -> models.HomeBoard:
+    board = home_board.load(uid, is_admin=is_admin, tab=tab)
     return models.HomeBoard.model_validate(
         {
             "widgets": board.widgets,
@@ -25,35 +32,57 @@ def _board(uid: str, is_admin: bool) -> models.HomeBoard:
             "column_choices": list(home_board.COLUMN_CHOICES),
             "base_columns": home_board.BASE_COLUMNS,
             "kinds": home_board.kinds(is_admin=is_admin),
+            "tab": board.tab,
+            "tabs": list(board.tabs),
         }
     )
 
 
 @router.get("/board", response_model=models.HomeBoard)
-def read_board(person: Owner) -> models.HomeBoard:
-    return _board(str(person["subject_id"]), bool(person.get("is_admin")))
+def read_board(person: Owner, tab: str = Query(default="", max_length=40)) -> models.HomeBoard:
+    return _board(str(person["subject_id"]), bool(person.get("is_admin")), tab)
 
 
 @router.put("/board", response_model=models.HomeBoard)
 def save_board(payload: models.HomeBoardRequest, person: OwnerMutation) -> models.HomeBoard:
     uid, is_admin = str(person["subject_id"]), bool(person.get("is_admin"))
     try:
-        home_board.save(uid, payload.widgets, is_admin=is_admin, columns=payload.columns, placement=payload.placement)
+        home_board.save(
+            uid,
+            payload.widgets,
+            is_admin=is_admin,
+            columns=payload.columns,
+            placement=payload.placement,
+            tab=payload.tab,
+        )
     except home_board.BoardError as exc:
         raise ApiError(400, str(exc), code="board_invalid") from None
-    return _board(uid, is_admin)
+    return _board(uid, is_admin, payload.tab)
 
 
 @router.delete("/board", response_model=models.HomeBoard)
-def reset_board(person: OwnerMutation) -> models.HomeBoard:
-    """Back to the starter set."""
-    home_board.reset(str(person["subject_id"]))
-    return _board(str(person["subject_id"]), bool(person.get("is_admin")))
+def reset_board(person: OwnerMutation, tab: str = Query(default="", max_length=40)) -> models.HomeBoard:
+    """Back to the starter set (that board only, when the person keeps several)."""
+    home_board.reset(str(person["subject_id"]), tab)
+    return _board(str(person["subject_id"]), bool(person.get("is_admin")), tab)
+
+
+@router.put("/board/tabs", response_model=models.HomeBoardTabs)
+def save_board_tabs(payload: models.HomeBoardTabsRequest, person: OwnerMutation) -> models.HomeBoardTabs:
+    """The person's boards renamed, reordered, added or removed, all at once."""
+    try:
+        tabs = home_board.save_tabs(str(person["subject_id"]), [tab.model_dump() for tab in payload.tabs])
+    except home_board.BoardError as exc:
+        raise ApiError(400, str(exc), code="board_invalid") from None
+    return models.HomeBoardTabs.model_validate({"tabs": list(tabs)})
 
 
 @router.get("/widgets/{kind}/data", response_model=models.HomeWidgetData)
-async def widget_data(kind: str, person: Member, fresh: bool = False) -> models.HomeWidgetData:
-    """An app widget's figures for the person's board; ``fresh`` asks the app again (Refresh)."""
+async def widget_data(
+    kind: str, person: Member, fresh: bool = False, settings: str = Query(default="", max_length=4000)
+) -> models.HomeWidgetData:
+    """An app widget's figures for the person's board; ``fresh`` asks the app again (Refresh).
+    ``settings``: that widget's own settings as JSON (which document a notes widget shows)."""
     from ctl.api.service_view import service_states
 
     is_admin = bool(person.get("is_admin"))
@@ -70,8 +99,17 @@ async def widget_data(kind: str, person: Member, fresh: bool = False) -> models.
         is_admin=is_admin,
         uid=str(person["subject_id"]),
         email=str(person.get("email") or ""),
+        settings=_settings_of(settings),
     )
     return models.HomeWidgetData.model_validate(data)
+
+
+def _settings_of(text: str) -> dict:
+    try:
+        value = json.loads(text) if text else {}
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _widget(kind: str, person: IdentityData) -> app_widgets.Offered:
@@ -81,22 +119,55 @@ def _widget(kind: str, person: IdentityData) -> app_widgets.Offered:
     return widget
 
 
-@router.post("/widgets/{kind}/action", response_model=models.OkResponse)
-async def widget_action(kind: str, payload: models.HomeWidgetAction, person: MemberMutation) -> models.OkResponse:
-    """A ticked box in an app widget (a habit done, a chore finished): the app records it."""
+@router.post("/widgets/{kind}/action", response_model=models.HomeWidgetActionResult)
+async def widget_action(
+    kind: str, payload: models.HomeWidgetAction, person: MemberMutation
+) -> models.HomeWidgetActionResult:
+    """A ticked box in an app widget (a habit done, a chore finished), or a view's change (a note
+    saved): the app records it, as the person."""
     widget = _widget(kind, person)
     try:
-        await run_in_threadpool(
-            app_widgets.act,
-            widget,
-            payload.action,
-            is_admin=bool(person.get("is_admin")),
-            uid=str(person["subject_id"]),
-            email=str(person.get("email") or ""),
+        result = await run_in_threadpool(
+            lambda: app_widgets.act(
+                widget,
+                payload.action,
+                is_admin=bool(person.get("is_admin")),
+                uid=str(person["subject_id"]),
+                email=str(person.get("email") or ""),
+                settings=dict(payload.settings),
+                payload=dict(payload.data),
+            )
         )
     except app_widgets.WidgetError as exc:
         raise ApiError(502, str(exc), code="widget_action_failed") from None
-    return models.OkResponse(ok=True)
+    return models.HomeWidgetActionResult.model_validate({"result": result})
+
+
+@router.get(
+    "/widgets/{kind}/file/{name}",
+    response_class=Response,
+    responses={200: {"content": {"image/*": {}}, "description": "The file, read from the app as the viewer."}},
+)
+async def widget_file(
+    kind: str, name: str, person: Member, settings: str = Query(default="", max_length=4000)
+) -> Response:
+    """One file an app widget shows (a slideshow's photo), read from the app with the viewer's own access."""
+    widget = _widget(kind, person)
+    try:
+        content, media = await run_in_threadpool(
+            lambda: app_widgets.file(
+                widget,
+                name,
+                is_admin=bool(person.get("is_admin")),
+                uid=str(person["subject_id"]),
+                email=str(person.get("email") or ""),
+                settings=_settings_of(settings),
+            )
+        )
+    except app_widgets.WidgetError as exc:
+        raise ApiError(502, str(exc), code="widget_file_failed") from None
+    # The viewer's own photo: kept by their browser only, never by anything in between.
+    return Response(content, media_type=media, headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.get("/widgets/{kind}/key", response_model=models.HomeWidgetKeyStatus)
@@ -142,13 +213,57 @@ async def search_places(_member: Member, q: str = "") -> models.PlacesResponse:
 
 
 @router.get("/stocks", response_model=models.StocksResponse)
-async def read_stocks(_member: Member, symbols: str = "") -> models.StocksResponse:
-    wanted = home_board.settings("stocks", {"symbols": symbols.split(",")})["symbols"]
+async def read_stocks(
+    _member: Member, symbols: str = "", span: str = Query("1d", alias="range")
+) -> models.StocksResponse:
+    wanted = home_board.settings("stocks", {"symbols": symbols.split(","), "range": span})
     try:
-        quotes = await run_in_threadpool(home_widgets.stocks, wanted)
+        quotes = await run_in_threadpool(home_widgets.stocks, wanted["symbols"], wanted["range"])
     except home_widgets.WidgetError as exc:
         raise ApiError(503, str(exc), code="stocks_unavailable") from None
     return models.StocksResponse.model_validate({"quotes": quotes})
+
+
+@router.get("/movers", response_model=models.MoversResponse)
+async def read_movers(
+    _member: Member, which: str = Query("gainers", alias="list"), symbols: str = ""
+) -> models.MoversResponse:
+    """The day's top movers on Yahoo Finance (gainers, losers, most traded), or the person's own tickers."""
+    wanted = home_board.settings("movers", {"list": which, "symbols": symbols.split(",")})
+    try:
+        found = await run_in_threadpool(home_widgets.movers, wanted["list"], wanted["symbols"])
+    except home_widgets.WidgetError as exc:
+        raise ApiError(503, str(exc), code="movers_unavailable") from None
+    return models.MoversResponse.model_validate({"movers": found})
+
+
+@router.get("/rates", response_model=models.RatesResponse)
+async def read_rates(_member: Member, base: str = Query("USD", max_length=3)) -> models.RatesResponse:
+    """Today's currency reference rates (the European Central Bank's), for the conversion widget."""
+    try:
+        data = await run_in_threadpool(home_widgets.rates, base)
+    except home_widgets.WidgetError as exc:
+        raise ApiError(503, str(exc), code="rates_unavailable") from None
+    return models.RatesResponse.model_validate(data)
+
+
+@router.get("/feeds", response_model=models.FeedsResponse)
+async def read_feeds(
+    _member: Member, url: Annotated[list[str], Query(max_length=8)] = FEEDS_NONE
+) -> models.FeedsResponse:
+    """The newest items of each news feed asked for; a feed that cannot be read says why."""
+    wanted = home_board.settings("rss", {"feeds": url or []})["feeds"]
+
+    def read_all() -> list[dict]:
+        found = []
+        for each in wanted:
+            try:
+                found.append(home_widgets.feed(each))
+            except home_widgets.WidgetError as exc:
+                found.append({"url": each, "error": str(exc)})
+        return found
+
+    return models.FeedsResponse.model_validate({"feeds": await run_in_threadpool(read_all)})
 
 
 @router.post("/ask", response_model=models.AskResponse)

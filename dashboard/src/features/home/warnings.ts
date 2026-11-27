@@ -1,9 +1,9 @@
-import { AlertTriangle, DatabaseBackup, HardDrive, Loader2, type LucideIcon } from 'lucide-react';
+import { AlertTriangle, DatabaseBackup, HardDrive, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import type { DismissedResponse, Metric } from '../../api';
 import { postJsonApi } from '../../api/client';
-import { isWorking, needsAttention, stateLabel, statusText } from '../../lib/services';
+import { needsAttention, stateLabel } from '../../lib/services';
 import { bytes } from '../../lib/format';
 import { useDashboard, useIsAdmin } from '../../state/dashboard';
 import { useCoreSetupActive } from './CoreSetupProgress';
@@ -13,7 +13,7 @@ export interface HomeNotice {
   /** What dismissing it records; empty for progress, which clears by itself. */
   warnings: string[];
   icon: LucideIcon;
-  tone: 'warning' | 'progress';
+  tone: 'warning';
   text: string;
   /** Further warnings folded into this row, such as a second backup warning. */
   more: number;
@@ -49,7 +49,7 @@ export function lowOnSpace(drive: Pick<Metric, 'total' | 'used'>) {
   return drive.total > 0 && free < Math.max(drive.total * 0.1, 20 * GB);
 }
 
-/** Home's warnings and progress rows; the sidebar's status counts the same warnings. */
+/** Home's warnings and the apps at work; the sidebar's status counts the same warnings. */
 export function useHomeNotices() {
   const { data } = useDashboard();
   const isAdmin = useIsAdmin();
@@ -58,7 +58,8 @@ export function useHomeNotices() {
   // The core apps' own progress card covers them while their setup runs.
   const coreActive = useCoreSetupActive();
   const coreApps = new Set(coreActive ? (data.core.apps || []).map((app) => app.service_id) : []);
-  const working = data.services.services.filter((service) => isWorking(service) && !coreApps.has(service.id));
+  // Apps at work, which Home shows as one notice with their turns.
+  const working = data.services.services.filter((service) => !coreApps.has(service.id));
   const setupIncomplete = data.provisioning.available && !data.provisioning.complete;
   const setupFailed = setupIncomplete && (data.provisioning.blocked || data.core.current_job?.state === 'failed');
   const worker = data.system.worker_state || '';
@@ -150,15 +151,6 @@ export function useHomeNotices() {
       more: backups.length - 1,
       to: '/settings/security',
     });
-  const progress: HomeNotice[] = working.map((service) => ({
-    key: `working-${service.id}`,
-    warnings: [],
-    icon: Loader2,
-    tone: 'progress',
-    text: `${service.name} is ${statusText(service).toLowerCase()}`,
-    more: 0,
-    to: `/apps/${service.id}`,
-  }));
   const count = notices.reduce((total, item) => total + 1 + item.more, 0);
-  return { notices, progress, count, dismiss };
+  return { notices, working, count, dismiss };
 }

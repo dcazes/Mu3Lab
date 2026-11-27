@@ -133,7 +133,7 @@ def _target(
     if not switch:
         return None
     step("download_images", f"Downloading {service.name} {version}, the release this backup is from.")
-    target = app_releases.approved(service, root, previous.variant if previous else "cpu")
+    target = app_releases.target(service, root, previous.variant if previous else "cpu", paths)
     try:
         if release_id:
             release = (

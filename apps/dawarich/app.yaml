@@ -17,7 +17,7 @@ widgets:
   refresh_seconds: 600
   largest: [12, 10]
   start: [4, 4]
-version: "1.21.0"
+version: "1.23.0"
 upstream: Freika/dawarich
 service:
   local_port: 3006

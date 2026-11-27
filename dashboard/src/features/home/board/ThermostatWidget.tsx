@@ -1,4 +1,4 @@
-import { Droplets, Flame, Minus, Plus, Snowflake } from 'lucide-react';
+import { Droplets, Flame, type LucideIcon, Minus, Plus, Power, Snowflake, SunSnow } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { postJsonApi, type ThermostatStatus } from '../../../api';
@@ -11,6 +11,8 @@ import type { WidgetProps } from './widgets';
 
 type Mode = NonNullable<ThermostatStatus['mode']>;
 const MODE_LABEL: Record<Mode, string> = { off: 'Off', heat: 'Heat', cool: 'Cool', auto: 'Auto' };
+// A small widget shows the modes as icons (each still named for screen readers and on hover).
+const MODE_ICON: Record<Mode, LucideIcon> = { off: Power, heat: Flame, cool: Snowflake, auto: SunSnow };
 
 /** HomeKit always speaks Celsius; show the unit the thermostat itself shows. */
 function shown(celsius: number | null | undefined, units: ThermostatStatus['units']) {
@@ -110,14 +112,20 @@ export function ThermostatWidget(_props: WidgetProps) {
     }
   };
   const StateIcon = view.state === 'heating' ? Flame : view.state === 'cooling' ? Snowflake : null;
-  // Short: the reading beside the set point, and the modes beside them once wide. Tall: the same parts
-  // stacked and larger. Narrow: the set point's label goes, its buttons and value stay.
+  // Short: the reading beside the set point, with the modes on the same line once wide, or on a line
+  // of their own below. Tall: the same parts stacked and larger. Narrow: the set point's label goes,
+  // its buttons and value stay, and the modes become icons. Administrators always get the modes.
   const measured = width > 0;
-  const tall = !measured || height >= 140;
+  const modes = isAdmin && (view.modes?.length ?? 0) > 1;
+  const tall = !measured || height >= (modes ? 170 : 140);
   const huge = measured && height >= 280 && width >= 300;
   const narrow = measured && width < 250;
-  const modesFit = tall ? !measured || (width >= 210 && height >= 170) : width >= 560;
-  const size = `${tall ? ' is-tall' : ' is-short'}${huge ? ' is-huge' : ''}${narrow ? ' is-narrow' : ''}${modesFit ? '' : ' no-modes'}`;
+  const inline = modes && !tall && width >= 560;
+  const below = modes && !inline;
+  const icons = measured && width < 210;
+  // Short with the modes below it: the heating line goes when the two lines leave it no room.
+  const tight = below && !tall && height < 96;
+  const size = `${tall ? ' is-tall' : ' is-short'}${huge ? ' is-huge' : ''}${narrow ? ' is-narrow' : ''}${below && !tall ? ' modes-below' : ''}${tight ? ' is-tight' : ''}${modes ? '' : ' no-modes'}`;
   return (
     <div className={`thermostat${size}`}>
       <div className="thermostat-now">
@@ -164,20 +172,29 @@ export function ThermostatWidget(_props: WidgetProps) {
           />
         </div>
       ) : null}
-      {isAdmin && modesFit && (view.modes?.length ?? 0) > 1 && (
-        <div className="segmented thermostat-modes" role="radiogroup" aria-label="Thermostat mode">
-          {(view.modes ?? []).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              role="radio"
-              aria-checked={view.mode === mode}
-              disabled={pending}
-              onClick={() => void change({ mode })}
-            >
-              {MODE_LABEL[mode]}
-            </button>
-          ))}
+      {modes && (
+        <div
+          className={`segmented thermostat-modes${icons ? ' is-icons' : ''}`}
+          role="radiogroup"
+          aria-label="Thermostat mode"
+        >
+          {(view.modes ?? []).map((mode) => {
+            const ModeIcon = MODE_ICON[mode];
+            return (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={view.mode === mode}
+                aria-label={icons ? MODE_LABEL[mode] : undefined}
+                title={icons ? MODE_LABEL[mode] : undefined}
+                disabled={pending}
+                onClick={() => void change({ mode })}
+              >
+                {icons ? <ModeIcon aria-hidden /> : MODE_LABEL[mode]}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

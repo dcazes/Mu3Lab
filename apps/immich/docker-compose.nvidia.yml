@@ -11,7 +11,7 @@ services:
               count: all
               capabilities: [gpu, compute, video]
   immich-machine-learning:
-    image: ghcr.io/immich-app/immich-machine-learning:v3.3.5-cuda@sha256:ba820b5b2ce199ef085bd5a42f092218f16994149019c5ab252bf387c22a99b4
+    image: ghcr.io/immich-app/immich-machine-learning:v3.4.2-cuda@sha256:0a8aeaeb6771da78c4f54bc00b429b113267db50aa121aa6e30f78ef86a31e33
     deploy:
       resources:
         reservations:

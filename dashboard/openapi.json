@@ -2701,6 +2701,86 @@
         "title": "Drive",
         "type": "object"
       },
+      "Feed": {
+        "properties": {
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/FeedItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "Feed",
+        "type": "object"
+      },
+      "FeedItem": {
+        "properties": {
+          "published": {
+            "default": 0,
+            "title": "Published",
+            "type": "number"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "title": "FeedItem",
+        "type": "object"
+      },
+      "FeedsResponse": {
+        "properties": {
+          "feeds": {
+            "items": {
+              "$ref": "#/components/schemas/Feed"
+            },
+            "title": "Feeds",
+            "type": "array"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "feeds"
+        ],
+        "title": "FeedsResponse",
+        "type": "object"
+      },
       "GpuMemory": {
         "description": "Graphics memory of the NVIDIA GPUs, all cards added up, in bytes.",
         "properties": {
@@ -2798,6 +2878,19 @@
             "title": "Placement",
             "type": "string"
           },
+          "tab": {
+            "default": "home",
+            "title": "Tab",
+            "type": "string"
+          },
+          "tabs": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HomeBoardTab"
+            },
+            "title": "Tabs",
+            "type": "array"
+          },
           "widgets": {
             "items": {
               "$ref": "#/components/schemas/HomeWidget"
@@ -2834,6 +2927,12 @@
             "title": "Placement",
             "type": "string"
           },
+          "tab": {
+            "default": "",
+            "maxLength": 40,
+            "title": "Tab",
+            "type": "string"
+          },
           "widgets": {
             "items": {
               "additionalProperties": {
@@ -2849,6 +2948,66 @@
           "widgets"
         ],
         "title": "HomeBoardRequest",
+        "type": "object"
+      },
+      "HomeBoardTab": {
+        "properties": {
+          "id": {
+            "default": "",
+            "maxLength": 40,
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 60,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "HomeBoardTab",
+        "type": "object"
+      },
+      "HomeBoardTabs": {
+        "properties": {
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "tabs": {
+            "items": {
+              "$ref": "#/components/schemas/HomeBoardTab"
+            },
+            "title": "Tabs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs"
+        ],
+        "title": "HomeBoardTabs",
+        "type": "object"
+      },
+      "HomeBoardTabsRequest": {
+        "description": "Every board the person keeps, in order: renamed, moved, new (no id) or left out (removed).",
+        "properties": {
+          "tabs": {
+            "items": {
+              "$ref": "#/components/schemas/HomeBoardTab"
+            },
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Tabs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs"
+        ],
+        "title": "HomeBoardTabsRequest",
         "type": "object"
       },
       "HomeKitDevice": {
@@ -2902,6 +3061,14 @@
       },
       "HomeWidget": {
         "properties": {
+          "children": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HomeWidget"
+            },
+            "title": "Children",
+            "type": "array"
+          },
           "h": {
             "title": "H",
             "type": "integer"
@@ -2909,6 +3076,11 @@
           "hide_on_phone": {
             "default": false,
             "title": "Hide On Phone",
+            "type": "boolean"
+          },
+          "hide_title": {
+            "default": false,
+            "title": "Hide Title",
             "type": "boolean"
           },
           "id": {
@@ -2926,6 +3098,11 @@
             "default": {},
             "title": "Settings",
             "type": "object"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
           },
           "w": {
             "title": "W",
@@ -2958,12 +3135,47 @@
             "minLength": 1,
             "title": "Action",
             "type": "string"
+          },
+          "data": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "default": {},
+            "title": "Data",
+            "type": "object"
+          },
+          "settings": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "default": {},
+            "title": "Settings",
+            "type": "object"
           }
         },
         "required": [
           "action"
         ],
         "title": "HomeWidgetAction",
+        "type": "object"
+      },
+      "HomeWidgetActionResult": {
+        "properties": {
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "result": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "default": {},
+            "title": "Result",
+            "type": "object"
+          }
+        },
+        "title": "HomeWidgetActionResult",
         "type": "object"
       },
       "HomeWidgetData": {
@@ -3039,6 +3251,14 @@
             "default": 0,
             "title": "Updated At",
             "type": "number"
+          },
+          "view": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "default": {},
+            "title": "View",
+            "type": "object"
           }
         },
         "required": [
@@ -3260,6 +3480,11 @@
               }
             ],
             "title": "Title"
+          },
+          "view": {
+            "default": "figures",
+            "title": "View",
+            "type": "string"
           },
           "w": {
             "title": "W",
@@ -3899,6 +4124,17 @@
             "title": "Kind",
             "type": "string"
           },
+          "queue_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Position"
+          },
           "service_id": {
             "title": "Service Id",
             "type": "string"
@@ -3935,6 +4171,28 @@
           "detail"
         ],
         "title": "Job",
+        "type": "object"
+      },
+      "JobCancelResponse": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "cancelled",
+              "cancelling"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "state"
+        ],
+        "title": "JobCancelResponse",
         "type": "object"
       },
       "JobDetailResponse": {
@@ -4844,6 +5102,72 @@
           "has_ui"
         ],
         "title": "ModelRunnerOption",
+        "type": "object"
+      },
+      "Mover": {
+        "properties": {
+          "change_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Percent"
+          },
+          "currency": {
+            "default": "",
+            "title": "Currency",
+            "type": "string"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "title": "Mover",
+        "type": "object"
+      },
+      "MoversResponse": {
+        "properties": {
+          "movers": {
+            "items": {
+              "$ref": "#/components/schemas/Mover"
+            },
+            "title": "Movers",
+            "type": "array"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "movers"
+        ],
+        "title": "MoversResponse",
         "type": "object"
       },
       "Mu3LabChangelog": {
@@ -6230,6 +6554,37 @@
           "state"
         ],
         "title": "QueuedJob",
+        "type": "object"
+      },
+      "RatesResponse": {
+        "properties": {
+          "base": {
+            "title": "Base",
+            "type": "string"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "rates": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Rates",
+            "type": "object"
+          }
+        },
+        "required": [
+          "base",
+          "date",
+          "rates"
+        ],
+        "title": "RatesResponse",
         "type": "object"
       },
       "RecoverySheet": {
@@ -7689,6 +8044,15 @@
             "title": "Repository",
             "type": "string"
           },
+          "source": {
+            "default": "mu3lab",
+            "enum": [
+              "mu3lab",
+              "upstream"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
           "supporting_only": {
             "title": "Supporting Only",
             "type": "boolean"
@@ -8564,6 +8928,15 @@
             "title": "Repository",
             "type": "string"
           },
+          "source": {
+            "default": "mu3lab",
+            "enum": [
+              "mu3lab",
+              "upstream"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
           "supporting_only": {
             "title": "Supporting Only",
             "type": "boolean"
@@ -8575,6 +8948,16 @@
           "update_enabled": {
             "title": "Update Enabled",
             "type": "boolean"
+          },
+          "upstream": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UpstreamRelease"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -8589,6 +8972,71 @@
           "blocked_reason"
         ],
         "title": "UpdateResponse",
+        "type": "object"
+      },
+      "UpdatesCancelResponse": {
+        "properties": {
+          "cancelled": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Cancelled",
+            "type": "array"
+          },
+          "finishing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Finishing",
+            "type": "array"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "cancelled",
+          "finishing"
+        ],
+        "title": "UpdatesCancelResponse",
+        "type": "object"
+      },
+      "UpstreamRelease": {
+        "description": "The newest release this server found from the app's makers, and what Mu3Lab's checks made of it.",
+        "properties": {
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "release_url": {
+            "title": "Release Url",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "state",
+          "checked_at",
+          "release_url"
+        ],
+        "title": "UpstreamRelease",
         "type": "object"
       },
       "VaultAutomatic": {
@@ -14568,8 +15016,21 @@
     },
     "/api/v1/home/board": {
       "delete": {
-        "description": "Back to the starter set.",
+        "description": "Back to the starter set (that board only, when the person keeps several).",
         "operationId": "reset_board_api_v1_home_board_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tab",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 40,
+              "title": "Tab",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -14659,6 +15120,19 @@
       },
       "get": {
         "operationId": "read_board_api_v1_home_board_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tab",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 40,
+              "title": "Tab",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -14841,6 +15315,108 @@
           }
         },
         "summary": "Save Board",
+        "tags": [
+          "home"
+        ]
+      }
+    },
+    "/api/v1/home/board/tabs": {
+      "put": {
+        "description": "The person's boards renamed, reordered, added or removed, all at once.",
+        "operationId": "save_board_tabs_api_v1_home_board_tabs_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HomeBoardTabsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HomeBoardTabs"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Save Board Tabs",
         "tags": [
           "home"
         ]
@@ -15405,6 +15981,228 @@
         ]
       }
     },
+    "/api/v1/home/feeds": {
+      "get": {
+        "description": "The newest items of each news feed asked for; a feed that cannot be read says why.",
+        "operationId": "read_feeds_api_v1_home_feeds_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "url",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Url",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Read Feeds",
+        "tags": [
+          "home"
+        ]
+      }
+    },
+    "/api/v1/home/movers": {
+      "get": {
+        "description": "The day's top movers on Yahoo Finance (gainers, losers, most traded), or the person's own tickers.",
+        "operationId": "read_movers_api_v1_home_movers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "list",
+            "required": false,
+            "schema": {
+              "default": "gainers",
+              "title": "List",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "symbols",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Symbols",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoversResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Read Movers",
+        "tags": [
+          "home"
+        ]
+      }
+    },
     "/api/v1/home/places": {
       "get": {
         "operationId": "search_places_api_v1_home_places_get",
@@ -15503,6 +16301,111 @@
           }
         },
         "summary": "Search Places",
+        "tags": [
+          "home"
+        ]
+      }
+    },
+    "/api/v1/home/rates": {
+      "get": {
+        "description": "Today's currency reference rates (the European Central Bank's), for the conversion widget.",
+        "operationId": "read_rates_api_v1_home_rates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "base",
+            "required": false,
+            "schema": {
+              "default": "USD",
+              "maxLength": 3,
+              "title": "Base",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Read Rates",
         "tags": [
           "home"
         ]
@@ -15711,6 +16614,16 @@
             "schema": {
               "default": "",
               "title": "Symbols",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "range",
+            "required": false,
+            "schema": {
+              "default": "1d",
+              "title": "Range",
               "type": "string"
             }
           }
@@ -16121,7 +17034,7 @@
     },
     "/api/v1/home/widgets/{kind}/action": {
       "post": {
-        "description": "A ticked box in an app widget (a habit done, a chore finished): the app records it.",
+        "description": "A ticked box in an app widget (a habit done, a chore finished), or a view's change (a note\nsaved): the app records it, as the person.",
         "operationId": "widget_action_api_v1_home_widgets__kind__action_post",
         "parameters": [
           {
@@ -16149,7 +17062,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OkResponse"
+                  "$ref": "#/components/schemas/HomeWidgetActionResult"
                 }
               }
             },
@@ -16234,7 +17147,7 @@
     },
     "/api/v1/home/widgets/{kind}/data": {
       "get": {
-        "description": "An app widget's figures for the person's board; ``fresh`` asks the app again (Refresh).",
+        "description": "An app widget's figures for the person's board; ``fresh`` asks the app again (Refresh).\n``settings``: that widget's own settings as JSON (which document a notes widget shows).",
         "operationId": "widget_data_api_v1_home_widgets__kind__data_get",
         "parameters": [
           {
@@ -16254,6 +17167,17 @@
               "default": false,
               "title": "Fresh",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "settings",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 4000,
+              "title": "Settings",
+              "type": "string"
             }
           }
         ],
@@ -16340,6 +17264,125 @@
           }
         },
         "summary": "Widget Data",
+        "tags": [
+          "home"
+        ]
+      }
+    },
+    "/api/v1/home/widgets/{kind}/file/{name}": {
+      "get": {
+        "description": "One file an app widget shows (a slideshow's photo), read from the app with the viewer's own access.",
+        "operationId": "widget_file_api_v1_home_widgets__kind__file__name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "settings",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 4000,
+              "title": "Settings",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/*": {}
+            },
+            "description": "The file, read from the app as the viewer."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Widget File",
         "tags": [
           "home"
         ]
@@ -17045,7 +18088,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/JobResponse"
+                  "$ref": "#/components/schemas/JobCancelResponse"
                 }
               }
             },
@@ -20680,6 +21723,98 @@
         ]
       }
     },
+    "/api/v1/service-updates/cancel": {
+      "post": {
+        "description": "Stop every app update that is still waiting or downloading; those switching versions finish.",
+        "operationId": "cancel_updates_api_v1_service_updates_cancel_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatesCancelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Cancel Updates",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
     "/api/v1/services": {
       "get": {
         "operationId": "list_services_api_v1_services_get",
@@ -21725,6 +22860,109 @@
           }
         },
         "summary": "Service Updates",
+        "tags": [
+          "services"
+        ]
+      }
+    },
+    "/api/v1/services/{service_id}/updates/check": {
+      "post": {
+        "description": "Look for a newer release from the app's makers now, and screen it, instead of waiting for the daily check.",
+        "operationId": "check_service_updates_api_v1_services__service_id__updates_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "required": true,
+            "schema": {
+              "title": "Service Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Check Service Updates",
         "tags": [
           "services"
         ]

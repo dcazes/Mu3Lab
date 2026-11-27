@@ -11,7 +11,7 @@ summary: An AI chat app with an assistant for each of your apps. Mu3Lab connects
   LiteLLM, signs everyone in with Authentik, and passes each person's own sign-in on to their app tools, as it does for
   Open WebUI. Choose it as the household chat in Settings > AI.
 version: "v0.8.9"
-upstream: danny-avila/LibreChat
+upstream: LibreChat-AI/LibreChat
 depends_on:
 - litellm
 - authentik
@@ -120,7 +120,7 @@ mobile:
     - web
     install: {}
     homepage: https://www.librechat.ai/
-    source: https://github.com/danny-avila/LibreChat
+    source: https://github.com/LibreChat-AI/LibreChat
     setup: pwa
     summary: Chat with your AI models and app assistants from the phone's home screen.
     caveat: Your phone must be connected to the Mu3Lab tailnet.

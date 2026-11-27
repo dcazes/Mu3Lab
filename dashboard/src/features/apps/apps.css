@@ -521,10 +521,64 @@
   opacity: 0.6;
 }
 
-/* Tiles or list, beside the search box. */
-.toolbar .view-switch {
+/* Select, tiles or list, and Update all: one group beside the search box, not a row of their own. */
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
   margin: 0 0 8px auto;
+}
+
+.toolbar-actions .view-switch {
   align-self: auto;
+}
+
+/* Select mode in the list: the whole row picks the app. */
+.pick-row {
+  color: var(--text);
+  font: inherit;
+}
+
+.pick-row:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.pick-row:disabled:hover {
+  background: none;
+}
+
+.pick-row.is-selected {
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+.pick-row.is-selected b {
+  color: var(--accent-text);
+}
+
+.pick-box {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+}
+
+.pick-row.is-selected .pick-box {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.pick-box svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 3;
+  animation: pop 0.14s ease-out;
 }
 
 .view-switch button {
@@ -595,4 +649,169 @@
   .update-all-list.is-columns {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Apps at work: one row for the app running now and how many wait, opening to the whole order. */
+.job-queue {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.job-queue-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 6px;
+}
+
+/* The bar's own hover fills only its button, with a little room before the arrow. */
+.job-queue-head > .job-queue-lead {
+  margin: 3px 0 3px 3px;
+  padding: 7px 11px;
+}
+
+.job-queue-lead {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  font: inherit;
+  font-weight: 500;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.job-queue-lead:hover {
+  background: var(--surface-hover);
+}
+
+.job-queue-count {
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.job-queue-lead > .job-queue-chevron {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--text-2);
+  transition: transform 0.15s;
+}
+
+.job-queue-lead[aria-expanded='true'] > .job-queue-chevron {
+  transform: rotate(180deg);
+}
+
+.job-queue-open {
+  flex: none;
+}
+
+.job-queue-lead > svg:first-child {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--blue);
+}
+
+.job-queue-lead > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.job-queue-lead > .attention-arrow {
+  width: 16px;
+  height: 16px;
+}
+
+.job-queue-toggle {
+  flex: none;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.job-queue-toggle svg {
+  width: 15px;
+  height: 15px;
+  transition: transform 0.15s;
+}
+
+.job-queue-toggle[aria-expanded='true'] svg {
+  transform: rotate(180deg);
+}
+
+.job-queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 6px 6px;
+  border-top: 1px solid var(--border);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.job-queue-list a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+}
+
+.job-queue-list a:hover {
+  background: var(--surface-hover);
+}
+
+.job-queue-list b {
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-queue-list small {
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.job-queue-turn {
+  width: 32px;
+  flex: none;
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.job-queue-now {
+  color: var(--blue);
+  font-weight: 600;
+}
+
+/* Inside an app's progress card the order sits under the bar, without a second border. */
+.job-queue-folded {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.job-queue-folded .job-queue-toggle {
+  margin-left: -8px;
+}
+
+.job-queue-folded .job-queue-list {
+  align-self: stretch;
+  padding: 4px 0 0;
 }

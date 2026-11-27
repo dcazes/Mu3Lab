@@ -29,6 +29,19 @@ def _where(status: RequestStatus, media: MediaStatus) -> tuple[str, str]:
     return "On its way", ""
 
 
+def _title(ctx: WidgetContext, key: str, kind: MediaType, tmdb_id: int | None) -> str:
+    """The film's or show's title, read as plain JSON: the client's own models refuse a film whose
+    release date Seerr leaves empty (one not yet dated), which would lose the whole widget."""
+    if not tmdb_id:
+        return "A request"
+    movie = kind == MediaType.MOVIE
+    try:
+        found = ctx.get(f"/api/v1/{'movie' if movie else 'tv'}/{tmdb_id}", headers={"X-Api-Key": key}) or {}
+    except WidgetError:
+        found = {}
+    return str(found.get("title" if movie else "name") or ("A film" if movie else "A show"))
+
+
 async def _requests(ctx: WidgetContext) -> dict[str, Any]:
     key = ctx.env().get(KEY_ENV, "")
     if not key:
@@ -40,12 +53,7 @@ async def _requests(ctx: WidgetContext) -> dict[str, Any]:
         items = []
         for request in newest:
             media = request.media
-            if media.media_type == MediaType.MOVIE and media.tmdb_id:
-                title = (await client.get_movie_details(media.tmdb_id)).title
-            elif media.tmdb_id:
-                title = (await client.get_tv_details(media.tmdb_id)).name
-            else:
-                title = "A request"
+            title = _title(ctx, key, media.media_type, media.tmdb_id)
             label, tone = _where(request.status, media.status)
             items.append(
                 {

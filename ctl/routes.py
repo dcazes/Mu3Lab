@@ -104,6 +104,13 @@ def _write_candidate(registry: Registry, root: Path, exclude: frozenset[str] = f
     return target, candidate, ingress_token
 
 
+def _same(target: Path, candidate: Path) -> bool:
+    try:
+        return target.read_bytes() == candidate.read_bytes()
+    except OSError:
+        return False
+
+
 def _activate_candidate(root: Path, target: Path, candidate: Path, ingress_token: str, log) -> tuple[bool, str]:
     """Validate and activate the rendered Caddy configuration."""
     if not ingress_token:
@@ -253,15 +260,30 @@ def rebase(base: str, deployed: str) -> str:
     return "\n\n".join(piece for piece in (before, START, body, END) if piece) + "\n"
 
 
-def apply(registry: Registry, current: Service, root: Path, log) -> tuple[bool, str]:
-    """Render Caddy and publish one route, using registry-owned port values."""
+# Rendering and activating the one Caddy configuration: two app updates side by side take turns.
+INGRESS_LOCK = "private-ingress"
+
+
+def apply(registry: Registry, current: Service, root: Path, log, *, only_if_changed: bool = False) -> tuple[bool, str]:
+    """Render Caddy and publish one route, using registry-owned port values.
+
+    ``only_if_changed`` (after an app update): when the rendered routes are exactly the ones Caddy
+    already serves, nothing is restarted. Restarting the private ingress briefly takes every app's
+    address away, and an update that kept its ports changes nothing there.
+    """
     if current.private_https_port is None or current.proxy_port is None:
         return True, "Service is internal-only; no private route is required."
-    try:
-        target, temporary, ingress_token = _write_candidate(registry, root)
-    except OSError as exc:
-        return False, str(exc)
-    activated, detail = _activate_candidate(root, target, temporary, ingress_token, log)
+    from ctl import resource_locks
+
+    with resource_locks.hold(INGRESS_LOCK):
+        try:
+            target, temporary, ingress_token = _write_candidate(registry, root)
+        except OSError as exc:
+            return False, str(exc)
+        if only_if_changed and _same(target, temporary):
+            temporary.unlink(missing_ok=True)
+            return True, "Private HTTPS route unchanged."
+        activated, detail = _activate_candidate(root, target, temporary, ingress_token, log)
     if not activated:
         return False, detail
     for route in current.route_targets:

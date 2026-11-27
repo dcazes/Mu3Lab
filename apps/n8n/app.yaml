@@ -22,7 +22,7 @@ widgets:
     help: In n8n, open Settings, then n8n API, and create an API key (no expiry, or a long one). Copy it here.
   largest: [12, 10]
   start: [4, 4]
-version: "n8n@2.48.5"  # the upstream release tag
+version: "n8n@2.49.7"
 upstream: n8n-io/n8n
 service:
   local_port: 5678
